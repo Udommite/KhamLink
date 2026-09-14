@@ -1,0 +1,22 @@
+{
+  "version": "retrieval-v1",
+  "purpose": "Predeclared engineering regression suite, not an independently labeled linguistic evaluation or user study",
+  "tuning_status": "Development benchmark; no held-out quality claim",
+  "corpus": "thai_dict@1.0",
+  "cases": [
+    {"id": "SRS-A-exact", "query": "อนุรักษ์", "kind": "exact", "expected": ["อนุรักษ์"], "val": ["VAL-002"]},
+    {"id": "SRS-A-description", "query": "คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย", "kind": "semantic", "expected": ["อนุรักษ์", "สงวน", "รักษา"], "val": ["VAL-001", "VAL-004"]},
+    {"id": "partial", "query": "อนุรั", "kind": "partial", "expected": ["อนุรักษ์"], "val": ["VAL-003"]},
+    {"id": "question", "query": "ของสำหรับเด็กเล่นเรียกว่าอะไร", "kind": "semantic", "expected": ["ของเล่น"], "val": ["VAL-004"]},
+    {"id": "meaning", "query": "รักษาให้คงเดิม", "kind": "semantic", "expected": ["อนุรักษ์"], "val": ["VAL-004", "VAL-005"]},
+    {"id": "sentence", "query": "ฉันอยากเก็บถนอมรักษาไว้", "kind": "semantic", "expected": ["สงวน", "รักษา"], "val": ["VAL-004"]},
+    {"id": "intent", "query": "อยากระวังดูแลป้องกันสิ่งนี้", "kind": "semantic", "expected": ["รักษา", "ป้องกัน", "ดูแล"], "val": ["VAL-004"]},
+    {"id": "homograph", "query": "ขัน", "kind": "exact", "expected": ["ขัน"], "val": ["VAL-009"]},
+    {"id": "no-result", "query": "zzzzzqqqqqxxxx", "kind": "empty", "expected": [], "val": ["VAL-008"]},
+    {"id": "SRS-B-word1", "query": "ประสิทธิภาพ", "kind": "coverage", "expected": ["ประสิทธิภาพ"], "val": ["VAL-017"]},
+    {"id": "SRS-B-word2", "query": "ประสิทธิผล", "kind": "coverage", "expected": ["ประสิทธิผล"], "val": ["VAL-017", "VAL-020"]},
+    {"id": "SRS-D-center", "query": "ความสุข", "kind": "coverage", "expected": ["ความสุข"], "val": ["VAL-023"]}
+  ],
+  "provisional_targets": {"exact_top1": 1.0, "semantic_hit_at_10": 0.6, "supported_claim_rate": 1.0, "unsupported_claim_rate": 0.0, "comparison_evidence_coverage": 1.0, "lookup_p95_ms": 2000, "hybrid_p95_ms": 3000, "generation_p95_ms": 15000},
+  "open_questions": ["Q-005", "Q-011", "Q-013", "Q-016", "Q-017"]
+}

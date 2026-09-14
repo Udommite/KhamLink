@@ -1,0 +1,41 @@
+# Local-only PostgreSQL demo. Production requires verified TLS and explicit policy approval.
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: khamlink
+      POSTGRES_USER: khamlink
+      POSTGRES_PASSWORD: ${KHAMLINK_POSTGRES_PASSWORD:?Set a URI-safe high-entropy local database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U khamlink -d khamlink"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      KHAMLINK_ENVIRONMENT: local
+      KHAMLINK_DATABASE_URL: postgresql+psycopg://khamlink:${KHAMLINK_POSTGRES_PASSWORD}@postgres/khamlink
+      KHAMLINK_DATA_DIR: /app/data
+      KHAMLINK_PROVIDER: extractive
+      KHAMLINK_ANALYTICS_ENABLED: "false"
+    volumes:
+      - app-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      start_period: 180s
+      retries: 5
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  app-data:
