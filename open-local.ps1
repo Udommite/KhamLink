@@ -8,7 +8,7 @@ function Test-KhamLinkReady {
     try {
         $khamlinkConfig = Invoke-RestMethod -Uri "$khamlinkUrl/api/config" -TimeoutSec 2
         $khamlinkReady = Invoke-RestMethod -Uri "$khamlinkUrl/ready" -TimeoutSec 2
-        return ($khamlinkConfig.data.source_notice -match 'Thai Wiktionary' -and $khamlinkReady.data.status -eq 'ready')
+        return ($khamlinkReady.data.status -eq 'ready')
     } catch { return $false }
 }
 

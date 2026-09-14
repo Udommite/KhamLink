@@ -9,7 +9,7 @@ export interface Claim { word: string; number: number; text: string; evidence_id
 export interface Evidence extends Definition { word: string; word_id: string }
 export interface Explanation { state: string; reason?: string; text?: string; claims: Claim[]; evidence: Evidence[]; provenance: Provenance; mode?: string; limitation?: string; curated_metadata?: Metadata[]; feedback_target?: string }
 export interface Neighbour { word_id: string; definition_id: string; word: string; description: string; similarity: number; provenance: Provenance }
-export interface Related { center: { word_id: string; word: string }; relationships: Edge[]; semantic_neighbours: Neighbour[]; semantic_neighbours_state: string; state: string; dataset_id: string; feedback_target?: string }
+export interface Related { center: { word_id: string; word: string }; relationships: Edge[]; semantic_neighbours: Neighbour[]; semantic_neighbours_state: string; state: string; dataset_id: string; feedback_target?: string; steer?: { word_id: string; word: string }; steer_state?: 'inactive' | 'active' | 'unknown_word' }
 export interface Edge { relationship_id: string; to_id: string; word_id?: string; type: string; word: string; description: string; provenance: Provenance; process_id: string; evidence_ids: string[]; source: Source; qualification?: string; generated_explanation?: Explanation; source_word_id?: string; target_word_id?: string; publication_state?: string; eligible?: boolean }
 export interface Span { word_id: string; text: string; start: number; end: number }
 export interface ContextResult { selection: Span; word: Word; sense_ids: string[]; ambiguous: boolean; explanation: Explanation; alternatives: Edge[]; feedback_target?: string }

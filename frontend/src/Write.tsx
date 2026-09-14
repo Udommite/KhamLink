@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import Editor from './Editor'
 import WordCard from './WordCard'
 import { api } from './api'
-import { countWords, excerpt, when, formalityLabels, type Doc, type Formality } from './docs'
-import type { Related, Review, Word } from './types'
+import { countWords, excerpt, when, SAVE_DEBOUNCE_MS, type Doc } from './docs'
+import type { Related, Word } from './types'
 import './write.css'
 
 export interface WriteProps {
@@ -51,7 +51,7 @@ export default function Write(props: WriteProps) {
   </section>
 }
 
-/** Reset selection and review state with each document, and discard requests for outdated text. */
+/** Reset selection state with each document and discard requests for outdated text. */
 function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: WriteProps & { doc: Doc }) {
   const [selection, setSelection] = useState<Selection | null>(null)
   const [word, setWord] = useState<Word>()
@@ -59,15 +59,13 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
   const [related, setRelated] = useState<Related>()
   const [lookupError, setLookupError] = useState('')
   const [lookupBusy, setLookupBusy] = useState(false)
-  const [review, setReview] = useState<Review>()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [active, setActive] = useState<string | null>(null)
   const [deletePending, setDeletePending] = useState(false)
   const [saving, setSaving] = useState(false)
   const ticket = useRef(0)
   const term = lookupOverride || selection?.tokenId || selection?.text.trim() || ''
-  useEffect(() => { setSaving(true); const timer = setTimeout(() => setSaving(false), 450); return () => clearTimeout(timer) }, [doc.body, doc.title])
+  /** Held until the debounced write has actually gone out, so the status never reads
+      "saved" while the edit is still sitting in the queue. */
+  useEffect(() => { setSaving(true); const timer = setTimeout(() => setSaving(false), SAVE_DEBOUNCE_MS + 150); return () => clearTimeout(timer) }, [doc.body, doc.title])
 
   /** A new selection starts a fresh lookup; alternatives keep the original replacement span. */
   useEffect(() => { setLookupOverride('') }, [selection?.start, selection?.end, selection?.text])
@@ -87,27 +85,15 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
     return () => { clearTimeout(timer); controller.abort() }
   }, [term])
 
-  /** Body or goal changes invalidate all backend offsets and pending review responses. */
+  /** Body changes invalidate the current selection and lookup offsets. */
   useEffect(() => {
-    ticket.current++; setReview(undefined); setActive(null); setBusy(false); setError('')
+    ticket.current++
     return () => { ticket.current++ }
-  }, [doc.body, doc.formality])
-
-  /** Explicit review keeps typing uninterrupted and uses the configured backend evidence. */
-  async function analyze() {
-    const current = ++ticket.current
-    setBusy(true); setError('')
-    try {
-      const result = await api<Review>('/review', { text: doc.body, formality: doc.formality })
-      if (ticket.current === current) setReview(result)
-    } catch (problem) {
-      if (ticket.current === current) setError(problem instanceof Error ? problem.message : 'Review unavailable. Please try again.')
-    } finally { if (ticket.current === current) setBusy(false) }
-  }
+  }, [doc.body])
 
   /** Any edit clears the old selection before its offsets can be reused. */
   function updateBody(body: string) {
-    ticket.current++; setSelection(null); setLookupOverride(''); setReview(undefined); setActive(null)
+    ticket.current++; setSelection(null); setLookupOverride('')
     onChange(doc.id, { body })
   }
 
@@ -117,15 +103,14 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
   }
 
   return <div className="write-workspace">
+    {/* The visible title is an <input>, so the open document needs a real heading of its
+        own — without it an open document is a page with no h1 at all. */}
+    <h1 className="sr-only">{doc.title || 'เอกสารไม่มีชื่อ'}</h1>
     <section className="write-paper" aria-label="Writing surface">
       <div className="write-paper-top"><span className="write-save-status" data-saving={saving} role="status">{saving ? 'กำลังบันทึก…' : 'บันทึกในเบราว์เซอร์แล้ว'}</span><span className="write-count" key={countWords(doc.body)}>{countWords(doc.body).toLocaleString()} คำ</span></div>
       <input className="write-title" aria-label="Document title" value={doc.title} onChange={event => onChange(doc.id, { title: event.target.value })} placeholder="Untitled document" />
-      <div className="write-goals">
-        <label>Tone <select aria-label="Writing tone" value={doc.formality} onChange={event => onChange(doc.id, { formality: event.target.value as Formality })}>{Object.entries(formalityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <button className="write-button write-review" disabled={busy || !doc.body.trim()} onClick={() => void analyze()}>{busy ? 'Reading your words…' : 'Review writing ↗'}</button>
-      </div>
-      <Editor value={doc.body} onChange={updateBody} suggestions={review?.suggestions || []} tokens={review?.tokens || []} activeId={active} selection={selection} onActivate={setActive} onSelect={setSelection} placeholder="เริ่มเขียนที่นี่… เลือกคำที่อยากรู้จักให้มากขึ้น" alternatives={selection && !lookupOverride ? [ ...(related?.relationships || []).map(edge => ({ word:edge.word, description:edge.description, ai:false })), ...(related?.semantic_neighbours || []).map(node => ({ word:node.word, description:node.description, ai:true })) ].slice(0, 4) : []} onAlternative={setLookupOverride} />
-      <footer className="write-paper-footer"><span>Your words stay in this browser. Review sends text to the language service.</span><button className="write-text-button" onClick={() => setDeletePending(!deletePending)}>Delete document</button></footer>
+      <Editor value={doc.body} onChange={updateBody} selection={selection} onSelect={setSelection} placeholder="เริ่มเขียนที่นี่… เลือกคำที่อยากรู้จักให้มากขึ้น" alternatives={selection && !lookupOverride ? [ ...(related?.relationships || []).map(edge => ({ word:edge.word, description:edge.description, ai:false })), ...(related?.semantic_neighbours || []).map(node => ({ word:node.word, description:node.description, ai:true })) ].slice(0, 4) : []} onAlternative={setLookupOverride} />
+      <footer className="write-paper-footer"><span>Your words stay in this browser.</span><button className="write-text-button" onClick={() => setDeletePending(!deletePending)}>Delete document</button></footer>
       {deletePending && <div className="write-delete" role="alert"><span>Delete this document? You can undo this during the session.</span><button className="write-button" onClick={() => setDeletePending(false)}>Keep it</button><button className="write-button" onClick={() => onDelete(doc.id)}>Delete</button></div>}
     </section>
     <aside className="write-inspector" aria-label="Word tools">
@@ -136,15 +121,7 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
         {lookupBusy && <p role="status">Finding its connections…</p>}
         {word && <WordCard word={word} related={related} compact onExplore={setLookupOverride} onReplace={replaceSelection} />}
         {lookupError && <p className="write-notice" role="status">{lookupError} Try Discover to search by meaning.</p>}
-      </> : <div className="write-inspector-empty"><div className="write-mini-network" aria-hidden="true"><span>ความคิด</span><i /><b>คำ</b><i /><span>บริบท</span></div><h2>Every word opens a possibility.</h2><p>เลือกคำในข้อความ เพื่อดูความหมาย สำรวจคำใกล้เคียง หรือหาคำที่ใช่กว่า</p><small>Select text to explore its meaning and alternatives.</small></div>}
-      <div className="write-review-results" aria-live="polite">
-        {error && <p role="alert">{error}</p>}
-        {review && <><span className="write-eyebrow">WRITING NOTES · {review.suggestions.length}</span>{review.degraded && <p className="write-notice">{review.degraded_reason || 'Some review features are unavailable.'}</p>}{!review.suggestions.length && <p>No suggestions in this review.</p>}{review.suggestions.map(suggestion => <article className="write-note" data-active={suggestion.id === active} key={suggestion.id}>
-          <button className="write-note-title" onClick={() => setActive(suggestion.id)}>{suggestion.title} <span>“{suggestion.text}”</span></button><p>{suggestion.message}</p>
-          {suggestion.replacements.map(replacement => <div className="write-replacement" key={replacement.word}><button className="write-button" onClick={() => updateBody(replaceSpan(doc.body, suggestion, replacement.word))}>Use {replacement.word} ↗</button><small>{replacement.provenance === 'AI_GENERATED_METADATA' ? 'AI suggestion · verify in context' : 'Dictionary / curated suggestion'}</small></div>)}
-          <button className="write-text-button" onClick={() => { setReview({ ...review, suggestions: review.suggestions.filter(item => item.id !== suggestion.id) }); setActive(null) }}>Dismiss</button>
-        </article>)}</>}
-      </div>
+      </> : <div className="write-inspector-empty"><div className="write-mini-network" aria-hidden="true"><span>ความคิด</span><i /><b>คำ</b><i /><span>บริบท</span></div><h2>เลือกคำเพื่อดูความหมาย</h2><p>ลากคลุมคำในข้อความ แล้วดูคำใกล้เคียง</p></div>}
     </aside>
   </div>
 }

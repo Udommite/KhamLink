@@ -16,6 +16,7 @@
 10. [Traceability Matrix](#10-traceability-matrix)
 11. [Risks and Open Questions](#11-risks-and-open-questions)
 12. [Suggested Rollout Phasing](#12-suggested-rollout-phasing)
+13. [Implementation Status](#13-implementation-status)
 
 ---
 
@@ -100,7 +101,7 @@ Established by reading the current implementation, so requirements below are dif
 | [REQ-UX-018](#req-ux-018) | Minimal-but-complete editor feature set | MOD-UX-10 | P0 |
 | [REQ-UX-019](#req-ux-019) | Satisfying typing feel and caret/bar animation | MOD-UX-10 | P1 |
 | [REQ-UX-020](#req-ux-020) | Discover ↔ Write transition polish | MOD-UX-11 | P1 |
-| [REQ-UX-021](#req-ux-021) | Embedding-steering slider (stretch) | MOD-UX-12 | P2 |
+| [REQ-UX-021](#req-ux-021) | Embedding-steering slider | MOD-UX-12 | P2 (pulled into scope, delivered) |
 
 ---
 
@@ -324,16 +325,21 @@ Established by reading the current implementation, so requirements below are dif
 - **Required behavior:** Switching between Discover and Write shall use a cohesive transition (shared-element or cross-fade/slide, consistent with the glass/motion language established elsewhere in this document) rather than an instant swap, and shall be reachable from a persistent, clearly-labeled control (a tab, not a buried link) so it reads as one product with two modes, not two separate pages.
 - **Acceptance criteria:** The switch completes as an animated transition, not an instant re-render; the control to switch is visible from both Discover and Write without scrolling.
 
-### 5.12 MOD-UX-12 — Stretch
+### 5.12 MOD-UX-12 — Embedding Steering
 
 <a id="req-ux-021"></a>
 #### REQ-UX-021: Embedding-steering slider (stretch)
 
 - **Source:** Brief point 20 — explicitly conditional ("if there's more time... MIGHT").
-- **Priority:** P2 — deferred from this redesign's core scope; documented for planning only.
-- **Required behavior (if pursued):** A slider (or set of sliders) tied to user-supplied steering words (e.g. ผู้หญิง) shall bias semantic-neighbor ranking/selection so results shift toward the steered concept (e.g. ราชา → ราชินี as "ผู้หญิง" increases) without the user re-typing a query.
-- **Dependency:** This requires vector arithmetic or re-ranking against the embedding space, which is a **backend/retrieval capability**, not a front-end styling change — see [§8](#8-data-and-api-impact). It is out of scope for this SRS's engineering estimate and should be scoped as its own BRD/API addendum if prioritized.
-- **Acceptance criteria:** N/A for this document — tracked as a follow-on spec, not committed here.
+- **Priority:** P2 — originally deferred; **subsequently pulled into scope at the product owner's request and delivered.** See [§13.1](#131-functional-requirements).
+- **Required behavior:** A slider (or set of sliders) tied to user-supplied steering words (e.g. ผู้หญิง) shall bias semantic-neighbor ranking/selection so results shift toward the steered concept (e.g. ราชา → ราชินี as "ผู้หญิง" increases) without the user re-typing a query.
+- **Dependency — resolved without new infrastructure.** This does require vector arithmetic against the embedding space, i.e. a backend change, but **not a model at query time**: the steering word's own vector is already in the shipped index, so the query point can be moved to `centre + weight · steer` using arithmetic over vectors that are present offline. No new service, model download, or index build is involved, which is why the estimate collapsed from "own BRD/API addendum" to one adapter method and one optional query parameter. The embedding-model-at-query-time design that made this expensive was never necessary.
+- **Design decisions taken:**
+  - **Additive, not analogical.** The classic `king − man + woman` analogy needs a second "from" word the brief never asks for. The brief's own framing is a single steering word whose influence *increases*, so the implementation is `centre + weight · steer`, re-normalised — monotonic in the weight, and undefined-free when the steering word is unknown.
+  - **Each sense is steered, and the aggregation never changes.** The unsteered path takes the max similarity over the centre's senses. The steered path steers *each* sense and takes the max over those — so at weight 0 the expression reduces exactly to the unsteered one. An earlier draft mean-pooled the centre only while steering, which silently swapped the aggregation at the first notch of the slider: a polysemous centre reordered at weight 0.001 for a reason that had nothing to do with the steering word. Only the steering word is mean-pooled, because it contributes one direction rather than several. `test_a_negligible_weight_does_not_reorder_a_polysemous_centre` pins the continuity.
+  - **Weight 0 is exactly "off".** With the weight at zero the response is byte-identical to an unsteered request, including still listing the steering word if it is a genuine neighbour. Only while steering is actually applied is that word suppressed from results, because there it names a direction rather than an answer.
+  - **A bad steering word degrades, never fails.** The map is the primary payload, so every way the steering word can be unusable — malformed, whitespace-only, over the 512-code-point limit, absent from the dictionary, or present but absent from the embedding index — is caught and reported in `steer_state` while the unsteered neighbours are still returned. An earlier draft validated it outside the handler, so a whitespace or over-long steer value returned HTTP 400 with `data: null`, taking the centre word, its relationships and its source attribution down with it. `tests/test_steer_api.py` pins each case.
+- **Acceptance criteria:** Moving the slider re-forms the neighbourhood around the **same centre** with no re-query and no change of headword; raising the weight moves steered-concept words monotonically up the ranking rather than flipping at one threshold; weight 0 is indistinguishable from no steering; an unknown steering word leaves the unsteered graph on screen and says why. Verified by `tests/test_steered_neighbours.py` (seven cases over hand-built vector spaces, including a polysemous centre), `tests/test_steer_api.py` (nine cases at the HTTP boundary) and the `REQ-UX-021` Playwright spec.
 
 ---
 
@@ -397,10 +403,17 @@ No new component library. Repurpose the already-defined, currently-unused `.dash
 
 ## 8. Data and API Impact
 
-This redesign is scoped as **front-end only**. No backend schema or endpoint changes are required for REQ-UX-001 through REQ-UX-020.
+REQ-UX-001 through REQ-UX-020 are **front-end only**: no backend schema or endpoint change is required for any of them, and none was made.
 
-- **Optional enhancement (not required for MVP):** a relation "strength"/weight field on `/words/{id}/related` edges would let the force simulation ([§7.1](#71-graph-physics)) tune link distance/strength by actual semantic closeness rather than a uniform default. In its absence, the simulation shall degrade gracefully to uniform edge strength with spacing derived from node degree — visually acceptable, just less differentiated. This is a candidate for a future BRD line item, not a blocker here.
-- **REQ-UX-021 (embedding slider)** would require a backend capability to bias/re-rank semantic neighbors against a user-supplied steering vector — out of this SRS's scope; see that requirement's note.
+- **Optional enhancement (not required for MVP):** a relation "strength"/weight field on `/words/{id}/related` edges would let the force simulation ([§7.1](#71-graph-physics)) tune link distance/strength by actual semantic closeness rather than a uniform default. In its absence, the simulation shall degrade gracefully to uniform edge strength with spacing derived from node degree — visually acceptable, just less differentiated. This is a candidate for a future BRD line item, not a blocker here. **Still open.**
+- **REQ-UX-021 (embedding slider) — delivered as an additive change to one existing endpoint.** `GET /api/words/{key}/related` gains two **optional** query parameters:
+
+  | Parameter | Type | Default | Meaning |
+  |---|---|---|---|
+  | `steer` | string (≤512, validated like any other word key) | `""` | Headword to bias the neighbourhood toward. |
+  | `steer_weight` | float, clamped server-side to `[0, 1]` | `0.0` | How far to move the query point toward it. |
+
+  The response is **additive, and only for callers that ask**: `steer_state` is present *only* when a `steer` parameter was supplied — a request that omits it keeps exactly the key set it had before, so no existing consumer can observe this feature. When a steering word resolves in the dictionary, a `steer: {word_id, word}` object is also returned (including at weight 0, so the control can label itself). `steer_state` is `"active"` only when the index actually steered; it is `"inactive"` at weight 0, `"unknown_word"` when the word cannot steer, and `"unavailable"` when the neighbour lookup itself failed — it reports what happened, not what was requested. Pinned by `tests/test_steer_api.py`. The retrieval side is `BgeIndex.neighbours(definition_ids, limit, steer_definition_ids, steer_weight)` — two new arguments with defaults that reproduce the previous behaviour exactly. No model executes at query time; see [REQ-UX-021](#req-ux-021).
 
 ---
 
@@ -462,8 +475,9 @@ All items below were open at the previous draft and have since been resolved by 
 <a id="q-ux-006"></a>
 - **Q-UX-006 — Undo/redo ordering. RESOLVED.** Undo ships first (P1, part of this redesign); redo is explicitly P2/deferred. Structure the undo history so redo is a cheap follow-on rather than a rewrite. See [REQ-UX-016](#req-ux-016).
 <a id="q-ux-007"></a>
-- **Q-UX-007 — Write/Discover shell.** Still open: [REQ-UX-020](#req-ux-020) was written without visibility into the actual page-shell/router component (not among the files reviewed for this SRS) — confirm the current mechanism before implementing the transition.
-- **REQ-UX-021 dependency risk.** Still open, and expected to stay open until scoped separately: this stretch item needs a backend capability this SRS does not scope.
+- **Q-UX-007 — Write/Discover shell. RESOLVED by inspection.** The shell is `frontend/src/main.tsx`: an `App` component driving a hash route (`#/`, `#/write`, `#/doc/{id}`, `#/word/{key}`), with Discover kept mounted under `hidden={writing}` and Write mounted only while writing. There is no router library. [REQ-UX-020](#req-ux-020)'s transition is therefore a root-level view transition around the `setRoute` update, which is what shipped — Discover staying mounted is also why its graph state survives a trip to Write and back.
+- **REQ-UX-021 dependency risk. RESOLVED — the risk did not materialise.** The assumption behind it was that steering needs an embedding model at query time. It does not: the steering word's vector already ships inside the index, so steering is arithmetic over data that is present offline. Delivered without a new service, model dependency, or index rebuild, and without disturbing [NFR-UX-005](#nfr-ux-005) (no packages added) or [NFR-UX-006](#nfr-ux-006) (no new network dependency). See [§8](#8-data-and-api-impact).
+- **Short-viewport graph band — open, low severity.** `.graph-viewport` is inset from the top by the header and from the bottom by the search dock in fixed pixels. Below roughly 560px of viewport *height* those insets consume the whole band and the graph collapses to nothing, while remaining fully correct at every supported viewport *width*. [NFR-UX-004](#nfr-ux-004) governs width breakpoints only, so this is outside its bar, but a landscape phone is exactly this shape and it should get a height-based breakpoint before mobile sign-off.
 
 ---
 
@@ -477,4 +491,137 @@ Ordered so each phase is independently shippable and later phases build on earli
 4. **Cinematic intro** — [REQ-UX-003](#req-ux-003), [REQ-UX-004](#req-ux-004): layers cleanly on top of a working, physics-based graph; doing it earlier means re-choreographing it against a graph engine that's still changing shape.
 5. **Write page** — [REQ-UX-017](#req-ux-017), [REQ-UX-018](#req-ux-018), [REQ-UX-019](#req-ux-019): largely independent of the Discover-side phases; can run in parallel with phases 2-4 if resourcing allows.
 6. **Navigation polish** — [REQ-UX-020](#req-ux-020): naturally last, since it ties together the two finished surfaces.
-7. **Stretch** — [REQ-UX-021](#req-ux-021): only after a separate backend-capability scoping pass, per [§8](#8-data-and-api-impact).
+7. **Steering slider** — [REQ-UX-021](#req-ux-021): shipped after phase 3, once the permanent panel existed to host the control. The separate backend-capability scoping pass this phase was gated on proved unnecessary — see [§8](#8-data-and-api-impact).
+
+---
+
+## 13. Implementation Status
+
+A live record of what has actually shipped against this document, kept current as work lands.
+Status is evidence-based: every **Met** row names the code that satisfies it, and every
+**Partially met** row names what is still missing. Line numbers drift — treat them as pointers.
+
+**Baseline:** `fb5513e` *("astra 2")* on `real-pipeline` delivered the first implementation pass
+(14 files, +1149/−105). This section records the audit of that pass and the work that follows it.
+
+### 13.1 Functional requirements
+
+| ID | Priority | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-UX-001 | P0 | **Met** | `redesign.css:2-10` defines `--space-1…8`, `--glass-bg/-border/-blur/-shadow`, `--surface-radius`. `redesign.css:59` gives Word Card, search box, compare box, writing paper and doc card one shared surface rule. `.language-lab` carries a two-stop radial mesh instead of a flat fill. Existing `--blue`/`--amber`/`--green` token names are untouched. |
+| REQ-UX-002 | P0 | **Met** | `styles.css:8` loads Niramit through the standard Google Fonts `css2` embed; `styles.css:11-12` heads `--ui` with it and points `--doc` at `--ui`. The offline fallback chain (`Leelawadee UI`, `Noto Sans Thai`, `Sarabun`, `system-ui`) is preserved after it, and `--mono` is untouched. |
+| REQ-UX-003 | P1 | **Met** | `Discover.tsx` renders `.intro-slogan` only while `intro` is true; no other surface carries the string. |
+| REQ-UX-004 | P1 | **Met** | Was the weakest part of the first pass: the scrim was a `::before` on `.discover-stage`, so it darkened the graph area while the header and dictionary panel stayed fully lit — it read as a grey patch over one section rather than a stage — and there were no beams at all, only an opacity fade on edges that were already dotted. Now a full-viewport `.intro-stage` sits above header and panel (z-index 45) with the graph raised above it, so the bloom is what you see. `SemanticGraph.tsx` stamps a `--beam` index on each edge and on each node (the index of the edge that reaches it); CSS derives both delays from it, so `beam-travel` sweeps a single dash the length of each edge and `node-resolve` fires where that beam lands. The slogan is pinned to the top band clear of the node field. Sequence completes ~1.4s inside the 1.8s window and the graph accepts clicks throughout. `sessionStorage['khamlink.intro.v1']` gates it to once per session; the `prefers-reduced-motion` block removes stage, beams and slogan. A related bug fell out of this: `.discover` carried a translating entrance animation, which made it the containing block for its own `position:fixed` children and offset the scrim by 8px — that animation is deleted. |
+| REQ-UX-005 | P0 | **Met** | `graph-physics.ts` runs springs + inverse-square charge + rectangular collision with a 6-pass positional projection; `SemanticGraph.tsx` paints per frame with a ±2px idle drift that excludes the centre node and is zeroed under reduced motion. **Cap = `GRAPH_CAP = 16`** (`graph-physics.ts:4`), inside the brief's 14-20 band — see [§13.4](#134-node-cap-measurement) for the frame-rate measurement that justifies it. |
+| REQ-UX-006 | P0 | **Met** | Expansion keeps prior particle positions (`seedParticles`'s `previous` argument, reused only while `generation` is unchanged). A new search bumps `generation`, sets `collapsing` for 180 ms and commits inside `document.startViewTransition` where supported, with the CSS `opacity`/`scale` path as the tested fallback. |
+| REQ-UX-007 | P0 | **Met** | `SemanticGraph.tsx` renders only a `.graph-node-dot` and the word. The relation-kind hint label and the hover `.graph-preview` tooltip are both gone from the JSX, and their dead CSS has been removed. Relation type is carried by dot shape/colour per `kind`. |
+| REQ-UX-008 | P0 | **Met** | `.discover-stage` is `position:fixed; inset:0` at viewport size; panel, dock, breadcrumb and footer are fixed layers above it. `.graph-viewport` reserves `--panel-width` on the right so the simulation centres inside the *visible* area, not the raw viewport. Asserted in `e2e-redesign/redesign.spec.ts`. |
+| REQ-UX-009 | P1 | **Met** | `.graph-path` moved out of `.graph-bottom` to a top-anchored glass strip below the header, clear of the panel and of the zoom controls. Still a list of real buttons, so keyboard operation is unchanged. |
+| REQ-UX-010 | P0 | **Met** | `.discover-inspector` is a permanent fixed right-hand column at `--panel-width: 33.333vw`; `Discover.tsx` focuses `คำ` on load so the panel is never empty. Below 940px `--panel-width` collapses to 0 and the panel becomes the existing bottom drawer with `.mobile-panel-toggle`. |
+| REQ-UX-011 | P0 | **Met** | `example` is gone from `metadataLabels` — grepping `WordCard.tsx` returns nothing, and the e2e spec asserts a word whose payload *does* carry `example` renders none of it. Hierarchy is size/weight-led: headword at `clamp(28px,3vw,42px)`, definition at 17px, metadata at 12px. |
+| REQ-UX-012 | P1 | **Met** | The `ความหมาย — คำ — บริบท` subtitle is removed from `Discover.tsx`; a repo grep finds it in no source file. No hover surface duplicates panel content. |
+| REQ-UX-013 | P1 | **Met** | `.search-mode` restyled as a segmented control with a sliding indicator and arrow/Home/End key handling. Search shows one field; Compare seeds two boxes and `+ Add word` adds more. |
+| REQ-UX-014 | P1 | **Met** | `redesign.css:59` applies one rule — same radius, border, background, shadow and blur — to `.word-card`, `.discover-search`, `.comparison-input`, `.comparison-column`, `.write-paper` and `.doc-card`; only padding and internal layout differ by role. |
+| REQ-UX-015 | P1 | **Met** | The `discover-below` / "FOLLOW YOUR CURIOSITY" block is gone from `Discover.tsx`, and its CSS has been removed. `.discover-footer` keeps brand, provenance and language indicator. |
+| REQ-UX-016 | P1 | **Met** | `Discover.tsx` adds a graph-navigation undo stack (40 entries, non-destructive cursor so redo stays a cheap follow-on) that no-ops when the event target is inside `input, textarea, [contenteditable]`. `main.tsx` adds the same-shaped undo for document deletion. Native textarea undo is untouched; `Editor.tsx` only supplies a one-step inverse on browsers lacking `execCommand('insertText')`. Redo remains out of scope per Q-UX-006. |
+| REQ-UX-017 | P0 | **Met** | The `<select>` picker is replaced by a `.doc-grid` of `.doc-card`s reusing the previously-unrendered gallery CSS. Create is a button, delete an inline confirm. The e2e spec asserts `.write-toolbar select` has zero matches. |
+| REQ-UX-018 | P0 | **Met** | `editor-format.ts` supplies `markdownSpans` (marker/bold/italic/heading/list, offsets unchanged so the mirror keeps identical metrics) and `indentEdit`. `Editor.tsx` paints those spans in the mirror, handles Tab/Shift+Tab through `execCommand('insertText')` so native undo survives, keeps Esc-then-Tab as the focus escape for keyboard users, and renders `.inline-alternatives` for a selected word. |
+| REQ-UX-019 | P1 | **Met** | The acceptance criterion this was failing was *"no layout thrash during normal typing"*: `Editor.tsx` set `style.height='auto'` and then read `scrollHeight` inside a `useLayoutEffect` keyed on `value` — a forced synchronous reflow on **every keystroke**. That effect is deleted. The mirror already lays out the same string at the same metrics, so it now sizes `.sheet` and the textarea is stretched over it; nothing measures text on the keystroke path. Verified live: sheet, mirror and textarea stay in exact agreement (360px empty → 852px at 22 lines), `scrollHeight` never exceeds the rendered height, and no inline height is written. State changes animate rather than swap: word count and suggestion count via `status-settle`, the save indicator via its pulsing `::before` dot, the focus bar via a `box-shadow` transition, suggestion underlines via `underline-reveal`. All inside the app-wide reduced-motion block. |
+| REQ-UX-020 | P1 | **Met** | `main.tsx` wraps the hash-route update in the shared `viewTransition()` helper (`api.ts`) with a direct fallback, and `::view-transition-old/new(root)` are given a 0.2s duration. The Discover/Write control is the persistent `.lab-nav` pair in the fixed header. The helper also settles the transition's `finished`/`ready`/`updateCallbackDone` promises: starting a transition while one is running rejects by design, and a graph click landing during a route change was surfacing that as an unhandled `InvalidStateError` in the console. |
+| REQ-UX-021 | P2 | **Met** | Pulled into scope at the product owner's request and delivered. An adversarial review of the first cut found four defects, all fixed and pinned by tests: the aggregation flipped from max-pool to mean-pool at the first slider notch (continuity now holds at weight 0); `steer_state` was computed before the steering was attempted, so it reported `"active"` when the index had steered nothing; a malformed `steer` value 400'd the whole `/related` payload; and a debounced refetch raced node clicks, able to pin one word's neighbours under another's headword. `BgeIndex.neighbours` gains `steer_definition_ids`/`steer_weight`, moving the query point to `centre + weight · steer` (mean-pooled per side, re-normalised) using the steering word's **own shipped vector** — so no model runs at query time and the offline posture holds. `GET /api/words/{key}/related` gains optional `steer`/`steer_weight` parameters and reports `steer_state`; a request without them is byte-identical to the previous contract. The `SteerControl` in the dictionary panel re-forms the neighbourhood around the same centre, debounced at 280 ms. Measured against the real Royal Society index: ราชา unsteered → กษัตราธิราช, กษัตร, อธิราช; steered 0.6 toward ผู้หญิง → รมณี, ราชญี, กระษัตรี, วธู — i.e. the brief's own ราชา → ราชินี example. See [§13.3](#133-steering-behaviour-measurement). |
+
+### 13.2 Non-functional requirements
+
+| ID | Status | Evidence / gap |
+|---|---|---|
+| NFR-UX-001 | **Met** | Idle drift, bloom, beams, transitions and typing micro-animations are all covered by the `prefers-reduced-motion` block at the end of `redesign.css`, which also disables the view transition. The simulation loop stops requesting frames entirely under reduced motion rather than merely animating to the same place. Frame rate measured in [§13.4](#134-node-cap-measurement). |
+| NFR-UX-002 | **Met** | Glass surfaces are built from `color-mix(… var(--paper) 94%, transparent)` — near-opaque, so text contrast does not depend on what the graph is doing behind it. That is the "solid enough scrim" this requirement asks for rather than blur alone, and it is the [Q-UX-003](#q-ux-003) clarity-first resolution applied in practice. Verified by the axe-core pass in all three Discover states and both Write states, zero violations. |
+| NFR-UX-003 | **Met** | No ARIA was dropped in the restyle: `aria-pressed` on nodes and mode buttons, `role="search"`/`combobox`/`listbox`, `aria-live="polite"` status, `aria-expanded` on the gallery and graph list, `role="toolbar"` on the new editor toolbar. The breadcrumb, mode selector and document gallery are all button-based and keyboard-operable. |
+| NFR-UX-004 | **Met** | The `1180px` / `940px` / `640px` breakpoints are extended, not replaced: below 940px `--panel-width` goes to 0 and the panel becomes the established drawer pattern. The e2e spec asserts `documentElement.scrollWidth === 360` at phone width — no horizontal overflow. |
+| NFR-UX-005 | **Met** | Zero dependencies added. `d3-force` was the [§7.1](#71-graph-physics) recommendation; the ~60-line hand-rolled `graph-physics.ts` covers a 16-node graph at full frame rate, so the dependency was not taken. Markdown, the mode selector, undo and the document gallery likewise added no packages. |
+| NFR-UX-006 | **Met** | The only new network resource is the Niramit family on the existing Google Fonts `@import` — the same progressive-enhancement path already in place, with the offline Thai fallback chain intact. Documents remain in `localStorage` via `docs.ts`. |
+
+### 13.3 Steering behaviour measurement
+
+REQ-UX-021's claim is that raising the weight shifts results toward the steered concept,
+**monotonically rather than at a threshold**. Measured against the live Royal Society index
+(65,569 senses), centre **ราชา**, steering word **ผู้หญิง**, top six neighbours at each weight:
+
+| Weight | `steer_state` | Neighbours returned |
+|---|---|---|
+| — (no parameters) | *(key absent)* | กษัตราธิราช, กษัตร, อธิราช, ขัตติย-, ธราธิบดี, กษัตริย- |
+| 0.0 | `inactive` | กษัตราธิราช, กษัตร, อธิราช, ขัตติย-, ธราธิบดี, กษัตริย- |
+| 0.2 | `active` | กษัตราธิราช, กษัตร, อธิราช, ขัตติย-, ธราธิบดี, อติราช |
+| 0.4 | `active` | กษัตราธิราช, กษัตร, อธิราช, ขัตติย-, ธราธิบดี, **เจ้าชีวิต** |
+| 0.6 | `active` | กษัตราธิราช, กษัตร, ขัตติย-, อธิราช, **เจ้าชีวิต**, **เทพิน** |
+| 0.8 | `active` | กษัตราธิราช, กษัตร, **กระษัตรี**, **รมณี**, **เทพิน**, ขัตติย- |
+| 1.0 | `active` | **กระษัตรี**, **รมณี**, กษัตราธิราช, **วธู**, คน, สาวแส้ |
+
+กระษัตรี is "queen"; รมณี and วธู are woman/bride. Three properties are visible here and each
+is what the requirement asks for:
+
+1. **Weight 0 reproduces the unsteered list exactly** — the first two rows are identical. The
+   slider is continuous at its origin rather than switching behaviour when it leaves zero.
+2. **The progression is gradual.** Royal synonyms give way one at a time as the weight rises,
+   rather than the list flipping wholesale at one point. This is why the control is a slider.
+3. **1.0 is the right ceiling.** Probing the adapter past the API's clamp gives 1.5 → สาวแส้,
+   อิสตรี; 2.0 → พุ่มพวง, นาเรศ; 3.0 → the centre word has stopped contributing at all. At
+   weight 1 the query point is the bisector of centre and steer, which is the furthest the
+   result still describes ราชา.
+
+**Observed useful range.** Visible reordering begins around 0.6. The weight is deliberately
+kept linear in the actual vector coefficient — "50% means half as much of the steering word"
+is explainable, and the compression is a property of the embedding space rather than of the
+control. If the product prefers more travel in the lower half, that is a UI curve over this
+same parameter, not a change to the retrieval maths.
+
+`tests/test_steered_neighbours.py` pins these as properties over hand-built vector spaces
+(monotonic rank improvement, continuity at zero, aggregation unchanged by steering), so they
+hold independently of what the corpus happens to contain.
+
+### 13.4 Node cap measurement
+
+REQ-UX-005 requires the chosen cap to be documented **with the measurement that justified it**.
+
+- **Cap shipped: 16** (`GRAPH_CAP`, `frontend/src/graph-physics.ts:4`), inside the brief's 14-20 band.
+- The cap is adaptive downward, never upward: `SemanticGraph.tsx` derives the visible count from actual
+  viewport area (`width × height / 17000`, floored at 8) and drops to 7 or 3 on small screens, so a phone
+  never simulates 16 nodes.
+- **Measured frame rate at the cap: 143.5–144.4 fps**, sampled over a one-second `requestAnimationFrame`
+  window on the settled 16-node graph at 1280×800 — comfortably above the 60 fps a display can show, so
+  the cap is not the constraint. Re-measured on each run by
+  `e2e-redesign/redesign.spec.ts` (test *"REQ-UX-001/005/008 and NFR-UX-001"*), which prints the figure.
+- **Overlap at the cap:** the same test asserts zero pairwise bounding-box intersections across all 16
+  rendered nodes after settle, and `redesign.test.ts` asserts the same property against the simulation
+  directly after 220 ticks. Legibility at 16 is therefore a tested property, not a judgement call.
+
+### 13.5 Validation
+
+Against the plan in [§9](#9-acceptance-criteria-and-validation-plan):
+
+| Plan item | Status |
+|---|---|
+| 1. Automated accessibility (axe-core, all Discover + Write states) | Covered — `redesign.spec.ts` runs `AxeBuilder` in four places and asserts zero violations. |
+| 2. Motion-preference test | Covered — the first spec emulates `reducedMotion:'reduce'`; the desktop spec re-emulates it mid-test and asserts a node's inline `style` is byte-identical 200 ms later, i.e. motion actually stopped. |
+| 3. Graph behaviour test (REQ-UX-006) | Covered — node click preserves the prior `data-node` set; a new search collapses to a single node. |
+| 4. Visual regression | Partially covered — screenshots are captured to `artifacts/redesign/` for desktop, mobile, compare and write, and the shared-surface rule is a single CSS declaration rather than four copies, but there is no automated pixel diff. Judged sufficient: one shared rule cannot drift between the surfaces it covers. |
+| 5. Manual QA checklist | Outstanding by design — intro pacing and Niramit glyph rendering across Windows/macOS/mobile need a human pass. |
+| 6. Undo scoping test | Covered — graph undo asserted on Discover; textarea `Control+z` after Tab asserted in the editor spec. |
+
+**Independent review.** The session's changes were put through an adversarial critic pass, which returned REJECT on the first cut with one critical and seven major findings. All correctness findings are fixed and each has a regression test: the steering aggregation, `steer_state` honesty, `/related` robustness to a bad steer value, the steer/click race, and a full-viewport intro scrim that was swallowing pointer events aimed at the search dock, panel and nav. Two findings (breadcrumb loss on steer, a StrictMode-consumed effect guard) had already been fixed before the review reported. Suite totals after the fixes: **121 backend, 29 frontend unit, 6 redesign e2e**, ruff clean.
+
+**The older acceptance suite is stale and currently red.** `frontend/e2e/journeys.spec.ts` (8 journeys × desktop/mobile) fails 16/16: it drives a workspace UI that no longer exists — it looks for a `เอกสาร` heading and a `+ เขียนงานใหม่` button. This is **not** redesign fallout. Those strings last existed in `frontend/src` at commit `c2d643a`; they were gone by `74a5fc2` *("Redesign Discover semantic language experience")*, two commits **before** the `fb5513e` redesign pass and three before the work recorded in this section. The spec has not been touched since `bbd911d`. It needs re-pointing at the current UI (`พื้นที่ของความคิด` / `+ เอกสารใหม่` / the `.doc-card` gallery) as its own task — until then it provides no regression signal for the journeys it names, which is the real cost.
+
+### 13.6 Remaining work
+
+1. **Manual QA** — [§9](#9-acceptance-criteria-and-validation-plan) item 5: intro pacing and Thai tone-mark
+   rendering in Niramit on real devices.
+2. **Optional backend enrichment** — the relation-strength field from [§8](#8-data-and-api-impact) would let
+   `tickParticles` vary link distance by semantic closeness; it currently uses a uniform spring length.
+3. **Short-viewport graph band** — below roughly 560px of viewport *height* the fixed top/bottom insets on
+   `.graph-viewport` consume the whole band and the graph collapses. Correct at every supported width, so
+   outside [NFR-UX-004](#nfr-ux-004)'s bar, but a landscape phone is exactly this shape. Needs a
+   height-based breakpoint before mobile sign-off.
+4. **Playwright browser provisioning** — `playwright.redesign.config.ts` now takes `PLAYWRIGHT_CHANNEL` so
+   the suite can run against an installed Chrome/Edge where the Playwright CDN is unreachable. The runs
+   recorded here used Edge; re-run on bundled Chromium where that download succeeds.

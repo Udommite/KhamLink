@@ -1,3 +1,5 @@
+import { flushSync } from 'react-dom'
+
 export class ApiError extends Error {
   constructor(message: string, public code: string, public correlationId = '') { super(message) }
 }
@@ -15,6 +17,17 @@ export function track(name: string, refs: Record<string, string | number> = {}) 
 }
 
 export const wordHref = (id: string) => `#/word/${encodeURIComponent(id)}`
+
+/** Run a state update inside a view transition, falling back to a plain update where the
+    API is absent or motion is unwanted. Starting one while another is still running
+    rejects by design (InvalidStateError) — a graph click landing during a route change is
+    the ordinary case — so those promises are settled here rather than surfacing as
+    unhandled rejections in the console. */
+export function viewTransition(update: () => void) {
+  if (!document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) { update(); return }
+  const transition = document.startViewTransition(() => flushSync(update))
+  for (const settled of [transition.finished, transition.ready, transition.updateCallbackDone]) settled.catch(() => undefined)
+}
 
 // Malformed user-supplied fragments must reach the normal unavailable-card state,
 // not throw during rendering and blank the entire anonymous application.

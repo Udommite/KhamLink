@@ -26,6 +26,8 @@ function runtimeLicenseNotices() {
 
 export default defineConfig({
   plugins: [react(), runtimeLicenseNotices()],
-  server: { proxy: { '/api': 'http://127.0.0.1:8000' } },
+  // KHAMLINK_API_ORIGIN lets a dev server point at a backend on another port without
+  // editing this file (e.g. testing a branch backend beside the running one).
+  server: { proxy: { '/api': process.env.KHAMLINK_API_ORIGIN || 'http://127.0.0.1:8000' } },
   test: { include: ['src/**/*.test.ts', 'src/**/*.test.tsx'], environment: 'jsdom', setupFiles: ['./src/test-setup.ts'] },
 })

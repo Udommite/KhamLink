@@ -56,35 +56,39 @@
 }
 
 :root[data-theme='dark'] {
-  --canvas: #0a1b33;
-  --paper: #102844;
-  --sunken: #173858;
-  --ink: #edf5ff;
-  --ink-2: #b7cbe1;
-  --ink-3: #819bb8;
-  --line: #284a6b;
-  --line-2: #1b3a5a;
+  /* Dark is not the light palette inverted. The ground goes near-black with a blue cast so
+     translucent surfaces have something to be bright against — a mid-navy ground made every
+     glass panel read as tinted plastic. Surfaces step up in lightness, not in saturation;
+     the chroma is spent on the accents instead. */
+  --canvas: #070c16;
+  --paper: #141c2b;
+  --sunken: #1e2839;
+  --ink: #eef3fa;
+  --ink-2: #a6b4c9;
+  --ink-3: #74839b;
+  --line: #2c384f;
+  --line-2: #212b3c;
 
-  --blue: #78aefb;
-  --blue-700: #a9caff;
-  --blue-50: #183f70;
-  --green: #46c978;
-  --green-700: #71df99;
-  --green-50: #123b29;
-  --amber: #f4c83d;
-  --amber-700: #ffe181;
-  --amber-50: #4d3d0e;
-  --correctness: #f0736a;
-  --clarity: #7aa4f7;
-  --engagement: #46c978;
-  --delivery: #b498e0;
-  --correctness-soft: #33211f;
-  --clarity-soft: #1c2433;
-  --engagement-soft: #123b29;
-  --delivery-soft: #262135;
-  --active-span: #564616;
-  --shadow: 0 1px 2px #0006, 0 8px 24px #0000004d;
-  --shadow-lg: 0 24px 64px #00000080;
+  --blue: #7fb0ff;
+  --blue-700: #adccff;
+  --blue-50: #1b2c49;
+  --green: #4fd39a;
+  --green-700: #8aecc0;
+  --green-50: #113429;
+  --amber: #f2c85c;
+  --amber-700: #ffdf9b;
+  --amber-50: #3b3014;
+  --correctness: #ff8480;
+  --clarity: #83a9f8;
+  --engagement: #4fd39a;
+  --delivery: #bba2ea;
+  --correctness-soft: #351f1e;
+  --clarity-soft: #1b2336;
+  --engagement-soft: #113429;
+  --delivery-soft: #262036;
+  --active-span: #4a3d14;
+  --shadow: 0 1px 2px #00000073, 0 8px 24px #0000005e;
+  --shadow-lg: 0 24px 64px #0000008c;
 }
 
 * { box-sizing: border-box }
@@ -156,23 +160,10 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .doc-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 196px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); text-align: left; transition: border-color var(--step), transform var(--step), box-shadow var(--step) }
 .doc-card:hover { border-color: var(--ink-3); transform: translateY(-2px); box-shadow: var(--shadow) }
 .doc-card:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-50) }
-/* Covers the card but sits under the menu button, so one click opens and the menu still works. */
-.doc-hit { position: absolute; inset: 0; z-index: 1; border-radius: var(--radius-lg) }
-.doc-hit:focus-visible { outline: none }
-.doc-card > *:not(.doc-hit) { position: relative; z-index: 2; pointer-events: none }
-/* Re-assert after the stacking rule above, which sets position on every child and
-   would otherwise drop the menu out of the corner and into the flow. */
-.doc-card .doc-menu { position: absolute; right: 10px; top: 12px; z-index: 3 }
-.doc-card .doc-menu, .doc-card .doc-menu * { pointer-events: auto }
-.doc-card h3 { font-size: 1.02rem; overflow-wrap: anywhere; color: var(--ink) }
-.doc-card .excerpt { font-family: var(--doc); font-size: .86rem; color: var(--ink-2); line-height: 1.8; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical }
-.doc-card .meta { font-size: .74rem; color: var(--ink-3) }
-.doc-card .kind { align-self: flex-start; font-size: .7rem; padding: 3px 9px; border-radius: 100px; background: var(--sunken); color: var(--ink-2) }
-.doc-menu { position: absolute; right: 10px; top: 12px; z-index: 3 }
-.menu-pop { position: absolute; right: 0; top: 30px; z-index: 20; min-width: 168px; padding: 6px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg) }
-.menu-pop button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: .85rem }
-.menu-pop button:hover { background: var(--sunken) }
-.menu-pop .danger { color: var(--correctness) }
+/* The .doc-hit / .doc-menu card belonged to a dashboard that no longer renders — nothing
+   in the app emits either class. Its `.doc-card > *:not(.doc-hit){pointer-events:none}`
+   still matched the Write gallery's cards, which open through a real <button class="doc-open">
+   rather than an overlay, so every document in เอกสารของฉัน was unclickable. */
 .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 80; display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-radius: var(--radius); background: var(--ink); color: var(--canvas); box-shadow: var(--shadow-lg); font-size: .86rem }
 .toast button { color: var(--amber); font-weight: 600 }
 

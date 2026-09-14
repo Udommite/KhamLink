@@ -485,6 +485,16 @@ class SearchService:
                 self.adapter, self.loaded_index = adapter, release["index_id"]
             return self.adapter
 
+    def warmup(self):
+        """Prepare local neural retrieval before serving; missing indexes remain optional."""
+        if self.settings.embedding != "bge-m3" or not self.settings.semantic_enabled:
+            return
+        try:
+            self.load_adapter(self.repository.release()).warmup()
+        except Exception:
+            # /** Lexical service startup must survive an absent or incompatible local index. */
+            return
+
     def search(self, query, limit, offset, correlation_id):
         release = self.repository.release()
         lexical = self.repository.lexical(query, release["dataset_id"], limit + offset + 1)
@@ -518,7 +528,7 @@ class SearchService:
         # Exact lookup has no embedding dependency. Optional related discovery is reached by a new query.
         if not (lexical and lexical[0]["match_type"] == "exact"):
             # A description is rewritten into definition-shaped probes before retrieval;
-            # if that rewrite fails the search simply runs unexpanded, never degraded.
+            # /** Failed expansion preserves retrieval but reports the missing enhancement. */
             extras = {}
             if self.expander.wanted(query, exact=False):
                 try:
@@ -528,6 +538,7 @@ class SearchService:
                         "boost": expansion["words"],
                     }
                 except Exception:
+                    degraded, degraded_reason = True, "QUERY_EXPANSION_UNAVAILABLE"
                     self.telemetry.emit(
                         "dependency", correlation_id, {"dependency": "expansion", "status": "failed"}
                     )
@@ -536,6 +547,12 @@ class SearchService:
                     query, min(200, (limit + offset) * 4), **extras
                 )
                 mode = semantic["mode"]
+                # /** Dependency failures outrank a healthy empty result in the single reason field. */
+                reason = semantic.get("degraded_reason")
+                if reason == "RERANKER_UNAVAILABLE":
+                    degraded, degraded_reason = True, reason
+                elif reason and not degraded and not candidates:
+                    degraded_reason = reason
                 for hit in semantic["candidates"]:
                     previous = candidates.get(hit["word_id"], {"match_type": "semantic", "lexical": 0.0})
                     # Compare against -inf, not 0: cross-encoder scores are unbounded logits

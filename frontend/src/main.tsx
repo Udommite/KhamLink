@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { flushSync } from 'react-dom'
-import { api, wordKeyFromHash } from './api'
+import { api, viewTransition, wordKeyFromHash } from './api'
 import Discover, { type DiscoverRequest } from './Discover'
 import Write from './Write'
 import { PrivacyModal } from './Modals'
@@ -17,14 +16,50 @@ function documentId(hash: string): string | null {
   catch { return null }
 }
 
+/** Light, dark, or whatever the OS says — stored only when the user states a preference,
+    so an unset choice keeps following the system instead of freezing on first visit. */
+type Theme = 'light' | 'dark' | 'system'
+function readTheme(): Theme {
+  try { const saved = localStorage.getItem('khamlink.theme'); return saved === 'light' || saved === 'dark' ? saved : 'system' } catch { return 'system' }
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(readTheme)
+  const [systemDark, setSystemDark] = useState(() => matchMedia('(prefers-color-scheme: dark)').matches)
+  useEffect(() => {
+    const query = matchMedia('(prefers-color-scheme: dark)')
+    const follow = () => setSystemDark(query.matches)
+    query.addEventListener('change', follow)
+    return () => query.removeEventListener('change', follow)
+  }, [])
+  const dark = theme === 'dark' || (theme === 'system' && systemDark)
+  useEffect(() => {
+    /** The palette lives behind `[data-theme]`, so "system" is resolved here rather than
+        duplicated as a second `prefers-color-scheme` copy of every token. */
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    try { theme === 'system' ? localStorage.removeItem('khamlink.theme') : localStorage.setItem('khamlink.theme', theme) }
+    catch { /* Private browsing keeps the choice for this session only. */ }
+  }, [theme, dark])
+  /* Drawn rather than typed: ☀/☾ sit on the text baseline, so they never centre in a round
+     button whatever the line-height, and Windows renders ☀ as a colour emoji. */
+  return <button className="lab-theme" aria-pressed={dark} aria-label={dark ? 'ใช้ธีมสว่าง' : 'ใช้ธีมมืด'} title={dark ? 'ใช้ธีมสว่าง' : 'ใช้ธีมมืด'}
+    onClick={() => setTheme(dark ? 'light' : 'dark')}>
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      {dark
+        ? <><circle cx="12" cy="12" r="4.2" /><path d="M12 2.4v2.4M12 19.2v2.4M2.4 12h2.4M19.2 12h2.4M5.2 5.2l1.7 1.7M17.1 17.1l1.7 1.7M18.8 5.2l-1.7 1.7M6.9 17.1l-1.7 1.7" /></>
+        : <path d="M20.2 14.6A8.6 8.6 0 1 1 9.4 3.8a6.9 6.9 0 0 0 10.8 10.8Z" strokeLinejoin="round" />}
+    </svg>
+  </button>
+}
+
 /** Two destinations share one brand and a moving active marker. */
 function TopNavigation({ writing, onWrite, onDiscover, onPrivacy }: {
   writing: boolean; onWrite: () => void; onDiscover: () => void; onPrivacy: () => void
 }) {
   return <header className="lab-header">
-    <a href="#/" className="lab-brand" onClick={onDiscover} aria-label="KhamLink Discover"><span className="lab-brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>Kham<span>Link</span><small>คำเชื่อมความคิด</small></span></a>
+    <a href="#/" className="lab-brand" onClick={onDiscover} aria-label="KhamLink Discover — ผู้ช่วยด้านภาษาไทยที่ช่วยให้ทุกความคิดเจอคำที่ใช่"><span className="lab-brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>Kham<span>Link</span><small title="ผู้ช่วยด้านภาษาไทยที่ช่วยให้ทุกความคิดเจอคำที่ใช่">ผู้ช่วยด้านภาษาไทยที่ช่วยให้ทุกความคิดเจอคำที่ใช่</small></span></a>
     <nav className={`lab-nav${writing ? ' nav-writing' : ''}`} aria-label="เมนูหลัก"><button aria-current={!writing ? 'page' : undefined} onClick={onDiscover}>Discover<span>↗</span></button><button aria-current={writing ? 'page' : undefined} onClick={onWrite}>Write<span>↗</span></button><i /></nav>
-    <button className="lab-about" onClick={onPrivacy}><span className="lab-live-dot" /><span>ภาษาไทย เชื่อมถึงกัน</span><span className="about-icon">i</span></button>
+    <div className="lab-header-end"><ThemeToggle /><button className="lab-about" onClick={onPrivacy}><span className="lab-live-dot" /><span>ภาษาไทย เชื่อมถึงกัน</span><span className="about-icon">i</span></button></div>
   </header>
 }
 
@@ -39,6 +74,7 @@ function App() {
     return term ? { term, key: 0 } : undefined
   })
   const [removed, setRemoved] = useState<store.Doc>()
+  const loaded = useRef(false)
   const writing = route.startsWith('#/write') || route.startsWith('#/doc/')
   const docId = documentId(route)
 
@@ -50,14 +86,28 @@ function App() {
         const term = wordKeyFromHash(location.hash)
         if (term) setRequest({ term, key: Date.now() })
       }
-      if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(() => flushSync(update))
-      else update()
+      viewTransition(update)
     }
     addEventListener('hashchange', navigate)
     return () => removeEventListener('hashchange', navigate)
   }, [])
   useEffect(() => { const controller = new AbortController(); api<Config>('/config', undefined, controller.signal).then(setConfig).catch(() => undefined); return () => controller.abort() }, [])
-  useEffect(() => { store.save(docs) }, [docs])
+  const writer = useRef(store.debouncedSave())
+  useEffect(() => {
+    /** Mount would otherwise write back exactly what load() just read. */
+    if (loaded.current) writer.current.queue(docs)
+    loaded.current = true
+  }, [docs])
+  useEffect(() => {
+    /** Flush whatever is still queued before the tab can be discarded. `pagehide` and the
+        hidden `visibilitychange` are the only signals a mobile browser reliably delivers
+        before tearing a page down; `beforeunload` is not. */
+    const save = () => writer.current.flush()
+    const onHidden = () => { if (document.visibilityState === 'hidden') save() }
+    addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', onHidden)
+    return () => { removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', onHidden); save() }
+  }, [])
   useEffect(() => {
     if (!removed || !writing) return
     const undoDelete = (event: KeyboardEvent) => {

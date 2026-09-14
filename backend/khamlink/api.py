@@ -1,12 +1,14 @@
 import time
 import uuid
 from contextlib import asynccontextmanager
+from math import isfinite
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, func, select, text
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException
 
 from .config import ROOT, Settings
@@ -102,15 +104,20 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app):
+        """Complete offline warm-up before serving and always release lifecycle resources."""
         telemetry.start()
-        yield
-        telemetry.close()
-        grounding.executor.shutdown(wait=False, cancel_futures=True)
-        if search.adapter is not None and hasattr(search.adapter.embedding, "close"):
-            search.adapter.embedding.close()
-        if hasattr(generator, "client"):
-            generator.client.close()
-        engine.dispose()
+        try:
+            # /** Await the worker so it cannot outlive the database or model resources. */
+            await run_in_threadpool(search.warmup)
+            yield
+        finally:
+            telemetry.close()
+            grounding.executor.shutdown(wait=False, cancel_futures=True)
+            if search.adapter is not None and hasattr(search.adapter.embedding, "close"):
+                search.adapter.embedding.close()
+            if hasattr(generator, "client"):
+                generator.client.close()
+            engine.dispose()
 
     app = FastAPI(
         title="KhamLink API",
@@ -345,25 +352,57 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
         return result(request, target(word, "word", word["word_id"], word["dataset_id"]))
 
     @app.get("/api/words/{key}/related")
-    def related(request: Request, key: str):
+    def related(request: Request, key: str, steer: str = "", steer_weight: float = 0.0):
         validate_text(key, 512, "word")
         related_data = repository.related(key, settings.map_limit)
         # Model-derived neighbours ride alongside the source map, never inside it: the map
         # shows only relationships the dictionary itself declares.
         related_data["semantic_neighbours"] = []
         related_data["semantic_neighbours_state"] = "unavailable"
+        # REQ-UX-021: an optional steering word biases which neighbours come back. It must
+        # never take the map down with it, so every way it can fail — malformed, too long,
+        # absent from the dictionary, absent from the index — is caught and reported in
+        # steer_state while the unsteered neighbours are still returned.
+        steer_definitions = []
+        # Clamp unconditionally, and outside the lookup: NaN fails every comparison, so
+        # spell the finite check rather than letting it slip through min/max untouched.
+        weight = min(max(steer_weight, 0.0), 1.0) if isfinite(steer_weight) else 0.0
+        if steer:
+            try:
+                validate_text(steer, 512, "steer")
+                steer_word = repository.lookup(steer, related_data["dataset_id"])
+                steer_definitions = [d["definition_id"] for d in steer_word["definitions"]]
+                related_data["steer"] = {"word_id": steer_word["word_id"], "word": steer_word["word"]}
+            except Exception:
+                steer_definitions = []
+        steered = False
         try:
-            neighbours = search.load_adapter(repository.release()).neighbours
+            adapter = search.load_adapter(repository.release())
             word = repository.lookup(related_data["center"]["word_id"], related_data["dataset_id"])
-            related_data["semantic_neighbours"] = neighbours(
-                [d["definition_id"] for d in word["definitions"]], settings.map_limit
+            related_data["semantic_neighbours"] = adapter.neighbours(
+                [d["definition_id"] for d in word["definitions"]],
+                settings.map_limit,
+                steer_definitions,
+                weight,
             )
             related_data["semantic_neighbours_state"] = "available"
+            # Report what actually happened, not what was asked for: a word the index does
+            # not carry steers nothing, and saying "active" there would be a lie.
+            steered = bool(steer_definitions) and weight > 0 and adapter.knows_definitions(steer_definitions)
         except Exception:
             telemetry.emit(
                 "dependency",
                 request.state.correlation_id,
                 {"dependency": "neighbours", "status": "failed"},
+            )
+        # Only a request that asked to steer gets a steer_state, so a plain /related
+        # response keeps exactly the key set it had before REQ-UX-021.
+        if steer:
+            related_data["steer_state"] = (
+                "unavailable" if related_data["semantic_neighbours_state"] != "available"
+                else "active" if steered
+                else "inactive" if steer_definitions and weight <= 0
+                else "unknown_word"
             )
         return result(
             request,

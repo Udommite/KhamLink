@@ -6,7 +6,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export default defineConfig({
   testDir: './e2e', timeout: 45000, fullyParallel: false, workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
-  use: { baseURL: 'http://127.0.0.1:8765', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  // PLAYWRIGHT_CHANNEL=msedge (or chrome) runs against an installed browser where the
+  // Playwright CDN is unreachable; unset means the bundled Chromium.
+  use: { baseURL: 'http://127.0.0.1:8765', channel: process.env.PLAYWRIGHT_CHANNEL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [
     { name: 'desktop', use: { browserName: 'chromium', viewport: { width: 1280, height: 720 } } },
     { name: 'mobile', use: { ...devices['Pixel 5'], viewport: { width: 360, height: 800 } } },

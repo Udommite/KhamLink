@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { Suggestion, Token } from './types'
 import { indentEdit, markdownSpans } from './editor-format'
 
@@ -16,11 +16,11 @@ import { indentEdit, markdownSpans } from './editor-format'
 interface Props {
   value: string
   onChange: (value: string) => void
-  suggestions: Suggestion[]
-  tokens: Token[]
-  activeId: string | null
+  suggestions?: Suggestion[]
+  tokens?: Token[]
+  activeId?: string | null
   selection: { start: number; end: number } | null
-  onActivate: (id: string) => void
+  onActivate?: (id: string) => void
   onSelect: (range: { start: number; end: number; text: string; tokenId: string | null } | null) => void
   placeholder?: string
   /** The card that belongs to the active span, rendered anchored to it. Grammarly puts
@@ -65,7 +65,7 @@ export function pieces(length: number, suggestions: Suggestion[], selection: Pro
   return split
 }
 
-export default function Editor({ value, onChange, suggestions, tokens, activeId, selection, onActivate, onSelect, placeholder, popover, onDismissPopover, alternatives = [], onAlternative }: Props) {
+export default function Editor({ value, onChange, suggestions = [], tokens = [], activeId = null, selection, onActivate, onSelect, placeholder, popover, onDismissPopover, alternatives = [], onAlternative }: Props) {
   const area = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = React.useState<{ top: number; left: number } | null>(null)
@@ -108,13 +108,9 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
   const painted = useMemo(() => pieces(characters.length, suggestions, selection), [characters.length, suggestions, selection])
 
   // Grow to fit: the surface scrolls, never the textarea, so the mirror never has to
-  // track a second scroll offset.
-  useLayoutEffect(() => {
-    const node = area.current
-    if (!node) return
-    node.style.height = 'auto'
-    node.style.height = `${node.scrollHeight}px`
-  }, [value, preview])
+  // track a second scroll offset. The mirror lays out the same string at the same metrics,
+  // so it sizes the sheet and the textarea is stretched over it — measuring scrollHeight
+  // per keystroke was a forced synchronous reflow on the typing path (REQ-UX-019).
 
   const measure = useCallback(() => {
     const mark = activeId ? mirror.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(activeId)}"]`) : null
@@ -236,7 +232,7 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
           if (!node) return
           const at = Array.from(node.value.slice(0, node.selectionStart)).length
           const hit = suggestions.find(s => at >= s.start && at <= s.end)
-          if (hit) onActivate(hit.id)
+          if (hit) onActivate?.(hit.id)
           else if (event.detail > 1) reportSelection()
         }}
         onBlur={() => { /* keep the last selection so the rail stays readable */ }}

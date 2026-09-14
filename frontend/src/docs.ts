@@ -58,6 +58,30 @@ export function save(docs: Doc[]): void {
   }
 }
 
+/** How long a burst of typing is allowed to coalesce before it reaches storage. Exported
+    so the "saving" indicator cannot claim a document is saved while a write is still
+    queued — the two have to move together. */
+export const SAVE_DEBOUNCE_MS = 700
+
+/** Every keystroke used to re-serialise the whole document list into localStorage. This
+    coalesces a burst of edits into one write. `flush` is not optional: a debounce that can
+    drop the last keystroke when the tab goes away is worse than no debounce at all. */
+export function debouncedSave(delay = SAVE_DEBOUNCE_MS, write: (docs: Doc[]) => void = save) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let pending: Doc[] | null = null
+  return {
+    queue(docs: Doc[]) {
+      pending = docs
+      clearTimeout(timer)
+      timer = setTimeout(() => { if (pending) { write(pending); pending = null } }, delay)
+    },
+    flush() {
+      clearTimeout(timer)
+      if (pending) { write(pending); pending = null }
+    },
+  }
+}
+
 export function create(partial: Partial<Doc> = {}): Doc {
   return blank(partial)
 }

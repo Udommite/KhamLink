@@ -18,6 +18,7 @@ leaves no prior, and ``SearchService`` already treats an unavailable index as de
 
 import json
 import math
+import threading
 
 import numpy as np
 
@@ -68,6 +69,28 @@ def entry_text(headword: str, english: str, definition: str) -> str:
     return f"{head}: {definition}" if definition else head
 
 
+def slerp(start, destination, weight):
+    """Follow a unit-sphere arc, choosing a deterministic plane for antipodal vectors."""
+    start = np.asarray(start, dtype=np.float64)
+    destination = np.asarray(destination, dtype=np.float64)
+    start = start / np.linalg.norm(start)
+    destination = destination / np.linalg.norm(destination)
+    cosine = np.clip(start @ destination, -1.0, 1.0)
+    if cosine > 1 - 1e-8:
+        target = (1 - weight) * start + weight * destination
+    else:
+        tangent = destination - cosine * start
+        length = np.linalg.norm(tangent)
+        if length < 1e-12:
+            # /** The antipode has no unique arc; use the least-aligned coordinate axis. */
+            tangent = np.eye(len(start))[np.argmin(np.abs(start))]
+            tangent -= (tangent @ start) * start
+            length = np.linalg.norm(tangent)
+        angle = np.arccos(cosine) * weight
+        target = np.cos(angle) * start + np.sin(angle) * tangent / length
+    return target / np.linalg.norm(target)
+
+
 class BgeIndex:
     """Dense index materialised from the shipped embeddings, plus lazily loaded models."""
 
@@ -97,6 +120,7 @@ class BgeIndex:
                 self.row_of_form.setdefault(form.strip(), row)
         self._encoder = None
         self._reranker = None
+        self._model_lock = threading.RLock()
 
     @property
     def embedding(self):
@@ -115,10 +139,16 @@ class BgeIndex:
 
     @property
     def encoder(self):
+        """Load the cached encoder once, including when startup and callers overlap."""
+        with self._model_lock:
+            return self._load_encoder()
+
+    def _load_encoder(self):
+        """Publish only a fully initialized encoder; never fetch model files at runtime."""
         if self._encoder is None:
             from sentence_transformers import SentenceTransformer
 
-            model = SentenceTransformer(self.settings.bge_model, device=self.device)
+            model = SentenceTransformer(self.settings.bge_model, device=self.device, local_files_only=True)
             model.max_seq_length = 512
             self._encoder = model.half() if self.device == "cuda" else model
         return self._encoder
@@ -127,15 +157,34 @@ class BgeIndex:
     def reranker(self):
         """Plain transformers rather than sentence_transformers.CrossEncoder: that wrapper
         breaks on transformers>=5, and one less layer keeps this adapter portable."""
+        with self._model_lock:
+            return self._load_reranker()
+
+    def _load_reranker(self):
+        """Load the cached reranker atomically without a startup network dependency."""
         if self._reranker is None:
             import torch
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-            tokenizer = AutoTokenizer.from_pretrained(self.settings.rerank_model)
-            model = AutoModelForSequenceClassification.from_pretrained(self.settings.rerank_model)
+            tokenizer = AutoTokenizer.from_pretrained(self.settings.rerank_model, local_files_only=True)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                self.settings.rerank_model, local_files_only=True
+            )
             model = model.to(self.device).eval()
             self._reranker = (tokenizer, model.half() if self.device == "cuda" else model, torch)
         return self._reranker
+
+    def warmup(self):
+        """Exercise both local models independently so one missing cache cannot skip the other."""
+        for operation in (self.encode_query, self._rerank) if self.settings.rerank_enabled else (self.encode_query,):
+            try:
+                if operation == self._rerank:
+                    operation("ความหมาย", ["ความหมาย"])
+                else:
+                    operation("ความหมาย")
+            except Exception:
+                # /** Requests retain their existing dense or lexical fallback when a model is absent. */
+                continue
 
     # ---------------- encoding (ContextService scores senses through this) ----------------
     def encode(self, texts):
@@ -274,28 +323,80 @@ class BgeIndex:
         ]
         if probes:
             mode += "_expanded"
-        return {"candidates": candidates, "mode": mode}
+        return {
+            "candidates": candidates,
+            "mode": mode,
+            "degraded_reason": "RERANKER_UNAVAILABLE" if "rerank_unavailable" in mode
+            else "NO_RELIABLE_CANDIDATE" if scores and not kept else None,
+        }
 
 
-    def neighbours(self, definition_ids, limit):
+    def knows_definitions(self, definition_ids) -> bool:
+        """Whether any of these definitions is actually in the index.
+
+        A word can be in the dictionary but absent from the embedding index, in which case
+        it cannot steer anything. Callers need to be able to say so rather than report a
+        steer that silently did nothing (REQ-UX-021).
+        """
+        return any(definition_id in self.row_of_definition for definition_id in definition_ids)
+
+    def neighbours(self, definition_ids, limit, steer_definition_ids=(), steer_weight=0.0):
         """Entries whose meaning sits near this one in the embedding space.
 
         Deliberately NOT the word map: these are model-derived and carry no source
         authority, so they are reported separately and labelled as such. They exist
         because most entries declare no cross-references at all — 5,367 edges across
         44,287 entries — and "words near this in meaning" is still worth offering.
+
+        With a steering word (REQ-UX-034) each sense follows a spherical arc to each
+        destination sense, preserving max-over-senses at both endpoints. The
+        steering vector is the steering word's OWN shipped vector, so this is arithmetic
+        over the existing index — no model runs here, and the offline posture holds.
         """
         rows = [self.row_of_definition[d] for d in definition_ids if d in self.row_of_definition]
         if not rows:
             return []
         origin = {self.word_ids[row] for row in rows}
-        similarity = (self.vectors @ self.vectors[rows].T).max(axis=1)
+        steer_rows = [
+            self.row_of_definition[d] for d in steer_definition_ids if d in self.row_of_definition
+        ]
+        steer_weight = min(max(steer_weight, 0.0), 1.0) if math.isfinite(steer_weight) else 0.0
+        if steer_rows and steer_weight == 1:
+            # /** Delegate so destination scores, exclusions and ordering are byte-identical. */
+            return self.neighbours(steer_definition_ids, limit)
+        if steer_rows and steer_weight > 0:
+            # /** All sense pairs converge to the destination's own max-over-senses scores. */
+            targets = np.asarray([
+                slerp(self.vectors[row], self.vectors[steer_row], steer_weight)
+                for row in rows for steer_row in steer_rows
+            ])
+            similarity = (self.vectors @ targets.T).max(axis=1)
+            # While steering, that word names a direction, not a result; echoing it is
+            # noise. At weight zero nothing is steered, so it stays an ordinary neighbour.
+            origin = origin | {self.word_ids[row] for row in steer_rows}
+        else:
+            similarity = (self.vectors @ self.vectors[rows].T).max(axis=1)
         neighbours, seen = [], set(origin)
+        order = []
         for row in np.argsort(-similarity):
             word_id = self.word_ids[row]
             if word_id in seen:
                 continue
             seen.add(word_id)
+            order.append(int(row))
+            if len(order) >= max(limit * 4, limit):
+                break
+        if steer_rows and 0 < steer_weight < 1 and order:
+            # /** Relevance minus maximum selected cosine; taper preserves exact endpoints. */
+            penalty = 0.5 * math.sin(math.pi * steer_weight)
+            selected = [order.pop(0)]
+            while order and len(selected) < limit:
+                redundancy = (self.vectors[order] @ self.vectors[selected].T).max(axis=1)
+                best = int(np.argmax(similarity[order] - penalty * redundancy))
+                selected.append(order.pop(best))
+            order = selected
+        for row in order[:limit]:
+            word_id = self.word_ids[row]
             neighbours.append(
                 {
                     "word_id": word_id,

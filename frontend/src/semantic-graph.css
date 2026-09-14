@@ -1,15 +1,14 @@
 /** The graph is the page canvas, not a boxed illustration. */
 .semantic-graph{position:relative;width:100%;height:490px;color:var(--lab-ink,#142c50);isolation:isolate}
-.graph-caption{position:absolute;z-index:2;top:17px;left:4%;display:flex;align-items:center;gap:9px;font:10px var(--ui,sans-serif);letter-spacing:.14em;color:var(--lab-muted,#627086);pointer-events:none}
-.graph-caption-count{margin-left:13px;opacity:.65;font-variant-numeric:tabular-nums}
+
 .graph-live-dot{width:5px;height:5px;border-radius:50%;background:var(--lab-blue,#0649b8)}
-.graph-viewport{height:100%;overflow:hidden;cursor:grab;touch-action:pan-y;position:relative;background-image:radial-gradient(circle,rgba(83,112,155,.16) .7px,transparent .9px);background-size:26px 26px;mask-image:linear-gradient(transparent,#000 12%,#000 85%,transparent)}
+.graph-viewport{height:100%;overflow:hidden;cursor:grab;touch-action:pan-y;position:relative;background-image:radial-gradient(circle,color-mix(in srgb,var(--ink-3) 30%,transparent) .7px,transparent .9px);background-size:26px 26px;mask-image:linear-gradient(transparent,#000 12%,#000 85%,transparent)}
 .graph-viewport.is-dragging{cursor:grabbing;touch-action:none}
 .graph-camera{position:relative;width:min(100%,1100px);height:460px;margin:0 auto;transform-origin:50% 48%;transition:transform 500ms cubic-bezier(.2,.8,.2,1)}
 .is-dragging .graph-camera{transition:none}
 .graph-lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .graph-edge path{fill:none;stroke:var(--lab-line,#d7dfea);stroke-width:1.2;vector-effect:non-scaling-stroke;animation:graph-connect .8s cubic-bezier(.22,.7,.3,1) both;animation-delay:var(--edge-delay)}
-.graph-edge circle{fill:#a9bad3;opacity:.7}
+.graph-edge circle{fill:var(--ink-3);opacity:.7}
 .graph-edge.is-semantic path{stroke-dasharray:.018 .024}
 .graph-edge.is-path path{stroke:var(--lab-blue,#0649b8);stroke-width:1.7;stroke-dasharray:none}
 .graph-edge.is-path circle{fill:var(--lab-accent,#f2d34f);opacity:1}
@@ -17,29 +16,25 @@
 .graph-node{position:relative;min-width:110px;min-height:70px;padding:9px 12px;border:0;background:none;color:var(--lab-ink,#142c50);font-family:var(--ui,sans-serif);cursor:pointer;display:flex;align-items:center;flex-direction:column;justify-content:center;gap:5px;isolation:isolate;animation:graph-arrive .75s cubic-bezier(.15,.8,.2,1) var(--node-delay) both}
 .graph-node-dot{display:block;width:9px;height:9px;flex:none;border:1.5px solid var(--lab-blue,#0649b8);background:var(--lab-bg,#f6f7f9);border-radius:50%;box-shadow:0 0 0 5px var(--lab-bg,#f6f7f9);transition:transform .3s,background .3s,box-shadow .3s}
 .graph-node-word{font-size:clamp(17px,2vw,23px);font-weight:450;line-height:1.65;white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis;background:var(--lab-bg,#f6f7f9);padding:0 7px;transition:color .2s,transform .3s}
-.graph-node-hint{font-size:9px;line-height:1.6;color:var(--lab-muted,#627086);opacity:.75;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.graph-node-hint span{display:inline-block;transition:transform .25s}
+
 .graph-node:hover .graph-node-word{color:var(--lab-blue,#0649b8);transform:translateY(-2px)}
 .graph-node:hover .graph-node-dot{background:var(--lab-accent,#f2d34f);transform:scale(1.4);box-shadow:0 0 0 8px rgba(6,73,184,.07)}
-.graph-node:hover .graph-node-hint span{transform:translate(2px,-2px)}
+
 .graph-node:active{scale:.96}
 .graph-node:focus-visible{outline:2px solid var(--lab-blue,#0649b8);outline-offset:5px;border-radius:4px}
-.graph-node-orbit{display:none}
+
 .is-center{z-index:3}
 .is-center .graph-node{width:156px;height:156px;border-radius:50%;color:#fff;background:var(--lab-blue,#0649b8);box-shadow:0 12px 40px -23px #0649b8;gap:0}
 .is-center .graph-node::before{content:'';position:absolute;inset:-13px;border:1px solid rgba(6,73,184,.13);border-radius:50%;pointer-events:none;animation:graph-breathe 7s ease-in-out infinite}
-.is-center .graph-node-orbit{display:block;position:absolute;inset:-28px;border:1px solid rgba(6,73,184,.055);border-radius:50%;pointer-events:none}
-.is-center .graph-node-orbit::after{content:'';position:absolute;top:23px;right:25px;width:7px;height:7px;background:var(--lab-accent,#f2d34f);border-radius:50%}
+
 .is-center .graph-node-dot{width:5px;height:5px;background:var(--lab-accent,#f2d34f);border:none;box-shadow:none;margin-bottom:5px}
 .is-center .graph-node-word{font-size:clamp(24px,3vw,36px);font-weight:500;background:none;color:#fff;max-width:150px;padding:0 8px}
 .is-center .graph-node:hover .graph-node-word{color:#fff}
-.graph-core-label{font-size:7px;font-weight:500;letter-spacing:.12em;color:#d4e3fa;margin-top:5px}
+
 .is-visited:not(.is-center) .graph-node-dot{background:var(--lab-accent,#f2d34f)}
-.is-history .graph-node{opacity:.55;min-height:55px}
-.is-history .graph-node-word{font-size:14px}
-.graph-preview{position:absolute;top:100%;left:50%;translate:-50% 0;width:210px;padding:12px 14px;z-index:8;font-size:12px;line-height:1.8;text-align:left;background:var(--lab-ink,#142c50);color:#fff;box-shadow:0 10px 30px #142c5017;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(5px);transition:opacity .2s,transform .2s;max-height:110px;overflow:hidden}
+
 .graph-node-position:hover,.graph-node-position:focus-within{z-index:6}
-.graph-node-position:hover .graph-preview,.graph-node-position:focus-within .graph-preview{opacity:1;visibility:visible;transform:translateY(0)}
+
 .graph-bottom{position:absolute;bottom:4px;left:4%;right:4%;display:flex;align-items:center;justify-content:space-between;gap:10px;z-index:7}
 .graph-legend{display:flex;gap:17px;color:var(--lab-muted,#627086);font-size:10px}
 .graph-legend span{display:flex;align-items:center;gap:7px}
@@ -57,5 +52,90 @@
 @keyframes graph-connect{from{opacity:0;stroke-dashoffset:1}to{opacity:1;stroke-dashoffset:0}}
 @keyframes graph-breathe{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.035);opacity:1}}
 @media(min-width:1400px){.semantic-graph{height:520px}.graph-camera{height:485px}}
-@media(max-width:640px){.semantic-graph{height:415px}.graph-camera{height:365px}.graph-caption{left:6%;top:10px;font-size:8px}.graph-caption-count{margin-left:4px}.graph-node{min-width:80px;padding:8px 2px}.graph-node-word{font-size:17px;max-width:130px}.graph-node-hint{font-size:8px;max-width:105px}.is-center .graph-node{width:112px;height:112px}.is-center .graph-node-word{font-size:25px;max-width:110px}.is-center .graph-node-orbit{inset:-18px}.is-center .graph-node::before{inset:-9px}.graph-core-label{font-size:5px}.graph-bottom{left:5%;right:5%;bottom:0;align-items:flex-end}.graph-legend{flex-direction:column;gap:5px;font-size:8px;padding-bottom:10px}.graph-controls{gap:0}.graph-controls button{min-width:38px;padding:0 7px}.graph-preview{width:160px}.is-history .graph-node-word{font-size:11px}.graph-node-position:first-child .graph-preview{top:105%}}
+@media(max-width:640px){.semantic-graph{height:415px}.graph-camera{height:365px}.graph-node{min-width:80px;padding:8px 2px}.graph-node-word{font-size:17px;max-width:130px}.is-center .graph-node{width:112px;height:112px}.is-center .graph-node-word{font-size:25px;max-width:110px}.is-center .graph-node::before{inset:-9px}.graph-bottom{left:5%;right:5%;bottom:0;align-items:flex-end}.graph-legend{flex-direction:column;gap:5px;font-size:8px;padding-bottom:10px}.graph-controls{gap:0}.graph-controls button{min-width:38px;padding:0 7px}}
 @media(prefers-reduced-motion:reduce){.semantic-graph *,.semantic-graph *::before,.semantic-graph *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+/** REQ-UX-026/027: viewport geometry belongs to the graph; chrome is a soft obstacle. */
+.discover-stage .semantic-graph .graph-viewport{position:absolute;inset:0;height:100%;mask-image:none;background:none;touch-action:none}
+.semantic-graph .graph-camera{width:100%;height:100%;max-width:none;margin:0;transform-origin:0 0;transition:none}
+.semantic-graph .graph-grid{position:absolute;inset:-200%;pointer-events:none;background-image:linear-gradient(color-mix(in srgb,var(--blue) 10%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--blue) 10%,transparent) 1px,transparent 1px),linear-gradient(color-mix(in srgb,var(--blue) 5%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--blue) 5%,transparent) 1px,transparent 1px);background-size:192px 192px,192px 192px,32px 32px,32px 32px;opacity:.6}
+
+/** Three parallax fields over an endless grid. Every layer is inset far past the viewport,
+ *  so panning never arrives at the edge of the decoration, and positions come from a hash
+ *  in the component rather than a CSS `mod()` lattice, which drew a visible repeating grid
+ *  as soon as the camera moved. */
+.graph-ambient{position:absolute;inset:-120%;pointer-events:none}
+.graph-ambient i{position:absolute;left:var(--x);top:var(--y);width:var(--size);height:var(--size);border-radius:50%;background:var(--blue);animation:graph-mote 30s ease-in-out infinite alternate,graph-twinkle var(--twinkle) ease-in-out infinite;animation-delay:var(--lag),var(--lag)}
+.graph-ambient.is-far i{opacity:.14;box-shadow:0 0 8px var(--blue);scale:.7}
+.graph-ambient.is-near i{opacity:.24;box-shadow:0 0 16px var(--blue);animation-duration:42s,var(--twinkle)}
+.graph-ambient.is-near i:nth-child(4n){background:var(--green);box-shadow:0 0 16px var(--green)}
+.graph-ambient.is-near i:nth-child(7n){background:var(--blue-700);box-shadow:0 0 20px var(--blue-700)}
+@keyframes graph-mote{to{translate:30px -38px}}
+@keyframes graph-twinkle{0%,100%{opacity:.06}50%{opacity:.42}}
+
+/** Hairlines at loose angles: the faintest echo of the graph's own edges, so the field
+ *  reads as a network the nodes belong to rather than as scattered dust. No blur — these
+ *  are the cheapest layer and carry most of the added texture. */
+.graph-filaments{position:absolute;inset:-120%;pointer-events:none}
+.graph-filaments i{position:absolute;left:var(--x);top:var(--y);width:var(--size);height:1px;rotate:var(--angle);transform-origin:0 50%;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--blue) 50%,transparent),transparent);animation:graph-mote 46s ease-in-out infinite alternate,graph-filament var(--twinkle) ease-in-out infinite;animation-delay:var(--lag),var(--lag)}
+.graph-filaments i:nth-child(5n){background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--green) 45%,transparent),transparent)}
+@keyframes graph-filament{0%,100%{opacity:.06}50%{opacity:.33}}
+
+/** Hollow circles, so the field is not one shape repeated at three sizes. */
+.graph-ringlets{position:absolute;inset:-120%;pointer-events:none}
+.graph-ringlets i{position:absolute;left:var(--x);top:var(--y);width:var(--size);height:var(--size);border-radius:50%;border:1px solid color-mix(in srgb,var(--blue) 45%,transparent);animation:graph-mote 38s ease-in-out infinite alternate,graph-ringlet var(--twinkle) ease-in-out infinite;animation-delay:var(--lag),var(--lag)}
+@keyframes graph-ringlet{0%,100%{opacity:.08;scale:.9}50%{opacity:.36;scale:1.05}}
+.graph-ringlets i:nth-child(3n){border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+.graph-ringlets i:nth-child(4n){border-style:dashed}
+
+/** Four-point sparkles — the one decoration that reads as a highlight, not a dot. */
+.graph-glints{position:absolute;inset:-120%;pointer-events:none}
+.graph-glints i{position:absolute;left:var(--x);top:var(--y);width:var(--size);height:var(--size);rotate:var(--angle);animation:graph-glint var(--twinkle) ease-in-out infinite;animation-delay:var(--lag)}
+.graph-glints i::before,.graph-glints i::after{content:'';position:absolute;left:0;right:0;top:50%;height:1px;background:linear-gradient(90deg,transparent,var(--blue),transparent)}
+.graph-glints i::after{rotate:90deg}
+.graph-glints i:nth-child(3n)::before,.graph-glints i:nth-child(3n)::after{background:linear-gradient(90deg,transparent,var(--green),transparent)}
+@keyframes graph-glint{0%,100%{opacity:.08;scale:.6}50%{opacity:.58;scale:1.2}}
+
+/** Deepest layer: very large, very soft colour fields drifting on their own clock. Blurred
+ *  far past any edge, so they never compete with a node label (REQ-UX-027). */
+.graph-orbs{position:absolute;inset:-70%;pointer-events:none}
+.graph-orbs i{position:absolute;width:calc(22vw + var(--orb)*4vw);height:calc(22vw + var(--orb)*4vw);border-radius:50%;filter:blur(70px);background:radial-gradient(circle,var(--blue),transparent 68%);opacity:.26;animation:graph-orb-drift calc(52s + var(--orb)*9s) ease-in-out infinite alternate;animation-delay:calc(var(--orb)*-8s)}
+.graph-orbs i:nth-child(3n){background:radial-gradient(circle,var(--green),transparent 68%);opacity:.2}
+.graph-orbs i:nth-child(5n){background:radial-gradient(circle,var(--blue-700),transparent 70%);opacity:.18}
+@keyframes graph-orb-drift{from{translate:0 0;scale:1}to{translate:5vw -4vw;scale:1.18}}
+
+/** Node: one chip, one word. The relation used to print under every headword and turned the
+ *  canvas into a wall of small print — it now lives in the accessible name and the tooltip.
+ *  Group and evidence still read visually from contour (solid vs dashed), dot shape and
+ *  edge weight, which is the two-channel requirement in REQ-UX-028c. */
+.semantic-graph .graph-node-position{transition:none;transform:translate(-50%,-50%);z-index:calc(6 - var(--depth,0))}
+.semantic-graph .graph-camera .graph-node-position .graph-node{height:42px;min-height:42px;width:100%;min-width:0;display:grid;place-items:center;gap:0;padding:0 12px;border:1px solid color-mix(in srgb,var(--blue) 26%,var(--paper));border-radius:13px;background:linear-gradient(color-mix(in srgb,var(--paper) 96%,var(--blue)),var(--paper));color:var(--ink);box-shadow:0 2px 6px color-mix(in srgb,var(--ink) 9%,transparent);touch-action:none;cursor:grab;animation:node-arrive .62s cubic-bezier(.2,.8,.25,1) both;transition:scale .5s cubic-bezier(.2,.85,.25,1),opacity .5s ease,border-color .3s,box-shadow .3s;scale:calc(1 - var(--depth,0)*.055);opacity:calc(1 - var(--depth,0)*.12)}
+.semantic-graph .graph-camera .graph-node:hover{border-color:var(--blue);box-shadow:0 6px 18px color-mix(in srgb,var(--blue) 22%,transparent);z-index:7}
+.semantic-graph .graph-camera .is-inferred .graph-node{border-style:dashed;border-color:color-mix(in srgb,var(--amber-700) 55%,var(--paper))}
+/** The focused word's own family is the dominant group: a tinted halo, not just a colour. */
+.semantic-graph .graph-camera .is-active-group .graph-node{box-shadow:0 0 0 4px color-mix(in srgb,var(--blue) 10%,transparent),0 3px 10px color-mix(in srgb,var(--ink) 10%,transparent)}
+.semantic-graph .graph-camera .is-center .graph-node{height:56px;min-height:56px;padding:0 20px;border:2px solid var(--blue);border-radius:17px;scale:1;opacity:1;background:linear-gradient(color-mix(in srgb,var(--paper) 92%,var(--blue)),var(--paper));box-shadow:0 10px 30px color-mix(in srgb,var(--blue) 24%,transparent)}
+.semantic-graph .graph-camera .is-center .graph-node::before{content:'';position:absolute;inset:-22px;border-radius:50%;background:radial-gradient(ellipse,color-mix(in srgb,var(--blue) 22%,transparent),transparent 70%);pointer-events:none;z-index:-1;animation:graph-breathe 6s ease-in-out infinite}
+.semantic-graph .graph-camera .graph-node-word{background:none;color:var(--ink);font:500 16px/1.6 var(--ui);padding:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.semantic-graph .graph-camera .graph-node:hover .graph-node-word{color:var(--blue);transform:none}
+.semantic-graph .graph-camera .is-center .graph-node-word{font-size:23px;font-weight:600;color:var(--blue)}
+.semantic-graph .graph-camera .graph-node-dot{position:absolute;top:4px;left:50%;translate:-50% 0;width:6px;height:6px;box-shadow:none;margin:0;flex:none}
+.semantic-graph .graph-camera .is-center .graph-node-dot{top:6px;width:7px;height:7px;background:var(--green);margin:0}
+.semantic-graph [data-pinned=true] .graph-node{cursor:grabbing;outline:2px solid var(--blue);outline-offset:4px}
+.semantic-graph .graph-edge.is-dictionary path{stroke:var(--blue);stroke-width:1.6;opacity:.45;animation:none}
+.semantic-graph .graph-edge.is-semantic path{stroke:var(--amber-700);stroke-width:1.3;stroke-dasharray:.014 .019;opacity:.55;animation:none}
+.semantic-graph .graph-edge.is-path path{stroke:var(--blue);stroke-width:3.2;stroke-dasharray:none;opacity:.85;animation:none}
+@keyframes node-arrive{from{opacity:0;scale:.9}to{opacity:1}}
+.semantic-graph .graph-node-position.is-leaving{pointer-events:none;z-index:0;animation:node-depart .42s ease forwards}
+.semantic-graph .graph-node-position.is-leaving .graph-node{cursor:default}
+@keyframes node-depart{to{opacity:0;scale:.9}}
+
+/** The opening is graph-local: focus arrives, beams travel outward in depth order, the
+ *  neighbours land where they end, and the field resolves last. No page-wide scrim. */
+.semantic-graph.graph-intro .graph-camera .is-center .graph-node{animation:graph-focus-arrival .6s .1s both}
+.semantic-graph.graph-intro .graph-camera .graph-node-position:not(.is-center) .graph-node{animation:graph-neighbour-arrival .38s both;animation-delay:calc(.62s + var(--beam)*.045s)}
+.semantic-graph.graph-intro .graph-edge path{stroke-dasharray:1;animation:beam-travel .4s linear both;animation-delay:calc(.42s + var(--beam)*.045s)}
+.semantic-graph.graph-intro .graph-grid,.semantic-graph.graph-intro .graph-ambient{animation:graph-field-arrival .6s .9s both}
+@keyframes graph-focus-arrival{0%{opacity:0;scale:.4}62%{opacity:1;scale:1.1}100%{opacity:1;scale:1}}
+@keyframes graph-neighbour-arrival{from{opacity:0;translate:0 9px;filter:blur(3px)}to{opacity:1;translate:0 0;filter:none}}
+@keyframes graph-field-arrival{from{opacity:0}to{opacity:.5}}
+@media(prefers-reduced-motion:reduce){.semantic-graph :is(.graph-ambient,.graph-orbs,.graph-filaments,.graph-ringlets,.graph-glints){transform:none!important}}

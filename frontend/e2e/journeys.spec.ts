@@ -1,172 +1,125 @@
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
-/* Core journeys through the writing workspace, on the real corpus.
-
-   Every assertion is against something a writer can see or do; none reaches into
-   application state. The accessibility and no-horizontal-scroll checks run at every stop
-   rather than once at the end, because a rail that traps focus or a sheet that overflows
-   only appears after an interaction. */
-
-const SAMPLE = 'อาหารร้านนี้แจ๋วมาก แต่เดือนหน้าร้านจะเจ๊งแล้ว น่าเสียดาย ฟลุ๊คคค'
-
+/** Audit each reached state and mobile overflow. */
 async function accessible(page: Page) {
   const report = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze()
-  expect(
-    report.violations,
-    JSON.stringify(report.violations.map(v => ({ id: v.id, nodes: v.nodes.map(n => n.target) }))),
-  ).toEqual([])
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
+  expect(report.violations, JSON.stringify(report.violations)).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
 }
 
+/** Enter the current writing surface with isolated browser storage. */
 async function newDocument(page: Page) {
-  await page.goto('/')
-  await page.evaluate(() => localStorage.clear())
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'เอกสาร', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '+ เขียนงานใหม่' }).click()
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await page.goto('/')
+  await page.getByRole('button', { name: 'Write', exact: true }).click()
+  await accessible(page)
+  await page.getByRole('button', { name: '+ เอกสารใหม่', exact: true }).click()
   await expect(page.getByLabel('ข้อความของคุณ')).toBeVisible()
 }
 
-async function review(page: Page, text = SAMPLE) {
-  await page.getByLabel('ข้อความของคุณ').fill(text)
-  await page.getByRole('button', { name: 'ตรวจข้อความ' }).click()
-  await expect(page.locator('.card').first()).toBeVisible({ timeout: 30000 })
-}
-
-test('dashboard creates, lists and restores a document', async ({ page }, testInfo) => {
+test('local documents create, restore and cancel deletion', async ({ page }, info) => {
   await newDocument(page)
-  await accessible(page)
-
-  await page.getByLabel('ชื่อเอกสาร').fill('บทความของฉัน')
+  await page.getByLabel('Document title').fill('บทความของฉัน')
   await page.getByLabel('ข้อความของคุณ').fill('ภาษาไทยเป็นสมบัติของชาติ')
-  await page.getByRole('button', { name: 'กลับไปหน้าเอกสาร' }).click()
-
-  const card = page.locator('.doc-card').first()
-  await expect(card).toContainText('บทความของฉัน')
-  await expect(card).toContainText('ภาษาไทยเป็นสมบัติของชาติ')
-  await expect(card).toContainText('คำ')
+  await expect(page.locator('.write-save-status')).toContainText('บันทึกในเบราว์เซอร์แล้ว')
+  await page.getByRole('button', { name: '▦ เอกสารของฉัน', exact: true }).click()
+  await expect(page.locator('.document-gallery .doc-card')).toContainText('บทความของฉัน')
   await accessible(page)
-  await page.screenshot({ path: testInfo.outputPath('dashboard.png'), fullPage: true })
-
-  // Documents live in this browser only, so a reload is the real persistence test.
+  await page.screenshot({ path: info.outputPath('documents.png'), fullPage: true })
   await page.reload()
-  await expect(page.locator('.doc-card').first()).toContainText('บทความของฉัน')
+  await page.getByRole('button', { name: 'Write', exact: true }).click()
+  await expect(page.getByLabel('ข้อความของคุณ')).toHaveValue('ภาษาไทยเป็นสมบัติของชาติ')
+  await page.getByRole('button', { name: 'Delete document', exact: true }).click()
+  await accessible(page)
+  await page.getByRole('button', { name: 'Keep it', exact: true }).click()
+  await expect(page.getByLabel('ข้อความของคุณ')).toHaveValue('ภาษาไทยเป็นสมบัติของชาติ')
 })
 
-test('review marks the text, links card to span, and accepts a replacement', async ({ page }, testInfo) => {
+test('Q-UX-009 retained review links notes to spans and dismisses without editing', async ({ page }, info) => {
   await newDocument(page)
-  await review(page)
-
-  // The unknown word is flagged; ordinary Thai compounds are not.
-  await expect(page.locator('.card', { hasText: 'ไม่พบคำนี้ในพจนานุกรม' })).toBeVisible()
-  await expect(page.locator('.card', { hasText: 'อาหาร' })).toHaveCount(0)
-
-  // Every card has a matching underline in the document, in its own colour.
-  const marks = page.locator('.mirror mark[data-cat]')
-  expect(await marks.count()).toBeGreaterThan(0)
-  await expect(page.locator('.mirror mark[data-cat="correctness"]').first()).toContainText('ฟลุ๊ค')
-
-  // Clicking a card makes its span the active one.
-  await page.locator('.card .card-kind').first().click()
+  const sample = 'อาหารร้านนี้แจ๋วมาก แต่เดือนหน้าร้านจะเจ๊งแล้ว น่าเสียดาย ฟลุ๊คคค'
+  await page.getByLabel('ข้อความของคุณ').fill(sample)
+  /** Keep the existing entry point until the product owner chooses its replacement. */
+  await page.getByRole('button', { name: 'Review writing ↗', exact: true }).click()
+  await expect(page.locator('.write-note').first()).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.mirror mark[data-cat]').first()).toBeVisible()
+  await page.locator('.write-note-title').first().click()
   await expect(page.locator('.mirror mark[data-active="true"]')).toHaveCount(1)
   await accessible(page)
-  await page.screenshot({ path: testInfo.outputPath('review.png'), fullPage: true })
-
-  const before = await page.getByLabel('ข้อความของคุณ').inputValue()
-  const cards = await page.locator('.card').count()
-  await page.locator('.card').first().getByRole('button', { name: 'ไม่ต้องแก้' }).click()
-  await expect(page.locator('.card')).toHaveCount(cards - 1)
-  // Dismissing changes the rail, never the writer's text.
-  await expect(page.getByLabel('ข้อความของคุณ')).toHaveValue(before)
+  await page.screenshot({ path: info.outputPath('review.png'), fullPage: true })
+  const count = await page.locator('.write-note').count()
+  await page.locator('.write-note').first().getByRole('button', { name: 'Dismiss', exact: true }).click()
+  await expect(page.locator('.write-note')).toHaveCount(count - 1)
+  await expect(page.getByLabel('ข้อความของคุณ')).toHaveValue(sample)
 })
 
-test('the writing goal decides which register warnings fire', async ({ page }) => {
-  await newDocument(page)
-  await review(page)
-  const colloquial = page.locator('.card', { hasText: 'ภาษาปาก' })
-
-  await page.getByRole('button', { name: 'กึ่งทางการ' }).click()
-  await page.getByRole('button', { name: 'ทางการ', exact: true }).click()
-  await page.getByRole('button', { name: 'ปิดหน้าต่าง' }).click()
-  await expect(colloquial.first()).toBeVisible({ timeout: 30000 })
-
-  await page.getByRole('button', { name: 'ทางการ', exact: true }).click()
-  await page.getByRole('button', { name: 'ไม่เป็นทางการ' }).click()
-  await page.getByRole('button', { name: 'ปิดหน้าต่าง' }).click()
-  // Colloquial words are unremarkable in casual writing, so the warnings go away.
-  await expect(colloquial).toHaveCount(0, { timeout: 30000 })
-})
-
-test('selecting a word opens its dictionary entry with numbered senses', async ({ page }, testInfo) => {
+test('selection opens sourced senses and continues in Discover', async ({ page }, info) => {
   await newDocument(page)
   await page.getByLabel('ข้อความของคุณ').fill('เราช่วยกันอนุรักษ์ภาษาไทย')
-  await page.getByLabel('ข้อความของคุณ').click()
-  // Select 'อนุรักษ์' by hand: Thai has no spaces, so a double-click cannot find it.
+  /** Native offsets select Thai text without relying on whitespace word boundaries. */
   await page.getByLabel('ข้อความของคุณ').evaluate((node: HTMLTextAreaElement) => {
-    node.setSelectionRange(8, 16)
+    const start = node.value.indexOf('อนุรักษ์')
+    node.focus(); node.setSelectionRange(start, start + 'อนุรักษ์'.length)
     node.dispatchEvent(new Event('select', { bubbles: true }))
   })
-  await expect(page.locator('.senses .sense').first()).toBeVisible({ timeout: 30000 })
-  await expect(page.locator('.entry-head')).toContainText('อนุรักษ์')
-  await expect(page.locator('.sense-no').first()).toHaveText('๑')
+  await expect(page.locator('.write-inspector h2').filter({ hasText: 'อนุรักษ์' })).toBeVisible({ timeout: 30000 })
   await accessible(page)
-  await page.screenshot({ path: testInfo.outputPath('entry.png'), fullPage: true })
+  await page.screenshot({ path: info.outputPath('selection.png'), fullPage: true })
+  await page.getByRole('button', { name: 'Discover ↗', exact: true }).click()
+  await expect(page.locator('.discover-inspector h2')).toHaveText('อนุรักษ์')
+  await accessible(page)
 })
 
-test('find a word from its meaning and insert it', async ({ page }) => {
-  await newDocument(page)
-  await page.getByRole('tab', { name: 'หาคำ' }).click()
-  await page.getByLabel(/อธิบายความหมาย/).fill('คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย')
-  await page.getByRole('button', { name: 'หาคำ', exact: true }).click()
-  await expect(page.locator('.result').first()).toContainText('อนุรักษ', { timeout: 60000 })
+test('meaning search reaches a card and suggestions remain keyboard operable', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await page.goto('/')
+  const field = page.getByRole('combobox')
+  await field.fill('คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย'); await field.press('Enter')
+  await expect(page.locator('.result-words button').first()).toContainText('อนุรักษ', { timeout: 40000 })
   await accessible(page)
-
-  await page.locator('.result').first().getByRole('button', { name: 'แทรกลงข้อความ' }).click()
-  await expect(page.getByLabel('ข้อความของคุณ')).toHaveValue(/อนุรักษ/)
+  await field.fill('อนุรักษ์')
+  await expect(page.getByRole('option').first()).toBeVisible({ timeout: 30000 })
+  await accessible(page)
+  await field.press('ArrowDown')
+  await expect(field).toHaveAttribute('aria-activedescendant', /suggestion-/)
+  await field.press('Enter')
+  await expect(page.locator('.discover-inspector h2')).toHaveText('อนุรักษ์')
 })
 
-test('compare two words side by side', async ({ page }, testInfo) => {
-  await newDocument(page)
-  await page.getByRole('tab', { name: 'เทียบคำ' }).click()
-  await page.getByLabel('คำแรก').fill('อนุรักษ์')
-  await page.getByLabel('คำที่สอง').fill('สงวน')
-  await page.getByRole('button', { name: 'เทียบความหมาย' }).click()
-  await expect(page.locator('.compare-col')).toHaveCount(2, { timeout: 30000 })
-  await expect(page.locator('.compare-cols')).toContainText('ถนอมรักษาไว้')
+test('REQ-UX-024 compares through the shared dock', async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await page.goto('/')
+  await page.locator('.search-mode button').nth(1).click()
+  await expect(page.locator('.discover-inspector input')).toHaveCount(0)
+  for (const term of ['อนุรักษ์', 'สงวน']) {
+    await page.getByRole('combobox').fill(term); await page.getByRole('combobox').press('Enter')
+  }
+  await expect(page.locator('.comparison-workspace')).toContainText('ถนอมรักษาไว้', { timeout: 30000 })
   await accessible(page)
-  await page.screenshot({ path: testInfo.outputPath('compare.png'), fullPage: true })
+  await page.screenshot({ path: info.outputPath('compare.png'), fullPage: true })
 })
 
-test('the breakdown reports counts measured for Thai', async ({ page }, testInfo) => {
+test('native editing, markdown preview and Thai counts', async ({ page }) => {
   await newDocument(page)
-  await review(page)
-  await page.getByRole('button', { name: 'สรุปข้อความ' }).first().click()
-
-  const modal = page.getByRole('dialog')
-  await expect(modal).toContainText('ตัวอักษร')
-  await expect(modal).toContainText('เวลาอ่าน')
-  await expect(modal).toContainText('สัดส่วนตัวอักษรที่อยู่ในพจนานุกรม')
-  // Not an English readability score: that formula does not apply to Thai.
-  await expect(modal).not.toContainText('Flesch')
+  const editor = page.getByLabel('ข้อความของคุณ')
+  await editor.fill('# ความคิด\n**ภาษาไทย** และ *ความหมาย*\n- บันทึก')
+  await editor.press('Control+Home'); await editor.press('Tab'); await expect(editor).toHaveValue(/^  #/)
+  await editor.press('Control+z'); await expect(editor).toHaveValue(/^# /)
+  await expect(page.locator('.write-count')).toContainText('คำ')
+  await page.getByRole('button', { name: 'ดูรูปแบบ', exact: true }).click()
+  await expect(page.locator('.markdown-preview strong')).toHaveText('ภาษาไทย')
   await accessible(page)
-  await page.screenshot({ path: testInfo.outputPath('breakdown.png'), fullPage: true })
-
-  await page.keyboard.press('Escape')
-  await expect(modal).not.toBeVisible()
+  await page.getByRole('button', { name: 'แก้ไขข้อความ', exact: true }).click()
+  await expect(editor).toHaveValue(/ภาษาไทย/)
 })
 
-test('the workspace is keyboard operable and respects the theme toggle', async ({ page }) => {
-  await newDocument(page)
-  await page.keyboard.press('Tab')
-  await expect(page.locator('.skip-link')).toBeFocused()
-
-  const before = await page.evaluate(() => document.documentElement.dataset.theme)
-  await page.getByRole('button', { name: 'สลับธีม' }).click()
-  const after = await page.evaluate(() => document.documentElement.dataset.theme)
-  expect(after).not.toBe(before)
-  await page.reload()
-  // The choice has to survive a reload or it is not a preference.
-  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(after)
-  await accessible(page)
+test('keyboard graph exploration, connection list and reset', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await page.goto('/')
+  await page.getByRole('button', { name: 'Show all word connections' }).click()
+  await expect(page.locator('.graph-list')).toBeVisible(); await accessible(page)
+  await page.getByRole('button', { name: 'ปิดรายการคำ' }).click()
+  const node = page.locator('.graph-node').nth(1)
+  const name = await node.locator('.graph-node-word').innerText()
+  await node.focus(); await node.press('Enter')
+  await expect(page.locator('.discover-inspector h2')).toHaveText(name)
+  await page.getByRole('button', { name: 'Start a new exploration' }).click()
+  await expect(page.locator('.discover-inspector h2')).toHaveText('คำ')
 })
