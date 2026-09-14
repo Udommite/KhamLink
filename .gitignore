@@ -21,4 +21,5 @@ data-verify/
 .omc/
 progress.txt
 .claude/
+.worktrees/
 data-verify/
