@@ -5,18 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "khamlink"
 version = "0.1.0"
-description = "Thai source-first lexical discovery with replaceable HippoRAG 2 retrieval"
+description = "Thai source-first lexical discovery with BGE-M3 dense retrieval, cross-encoder rerank and a corpus-frequency prior"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115.12,<1", "uvicorn>=0.34,<1", "pydantic>=2.11,<3",
   "pydantic-settings>=2.8,<3", "SQLAlchemy>=2.0.40,<3", "alembic>=1.15,<2",
   "httpx>=0.28,<1", "numpy>=2.2,<3", "scipy>=1.15,<2",
-  "scikit-learn>=1.6,<2", "pythainlp==5.3.7", "psycopg[binary]>=3.2,<4"
+  "scikit-learn>=1.6,<2", "pythainlp==5.3.7", "psycopg[binary]>=3.2,<4",
+  "pyarrow>=17,<23"
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<10", "pytest-cov>=6,<8", "ruff>=0.11,<1"]
-neural = ["sentence-transformers>=5,<6"]
+# BGE-M3 retrieval. Install a CUDA torch build first for GPU inference:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+neural = ["sentence-transformers>=5,<6", "transformers>=4.44", "torch>=2.4"]
 
 [project.scripts]
 khamlink = "khamlink.cli:main"

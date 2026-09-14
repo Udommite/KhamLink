@@ -17,3 +17,8 @@ frontend/*.tsbuildinfo
 *.log
 *.egg-info/
 artifacts/
+data-verify/
+.omc/
+progress.txt
+.claude/
+data-verify/

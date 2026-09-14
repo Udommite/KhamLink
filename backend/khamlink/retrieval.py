@@ -8,6 +8,7 @@ import copy
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import threading
 import time
@@ -22,16 +23,43 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 from threadpoolctl import threadpool_limits
 
+from .bge import frequency_bonus
 from .db import Dataset, IndexBuild, now
 from .domain import NORMALIZATION_VERSION, DomainError, stable_id
 from .ingestion import sha256_file
 from .providers import DictionaryExtraction, LocalRecognition, LSAEmbedding, embedding_provider
 
 METHOD_VERSION = "khamlink-hipporag2-method-v2"
+# Rerank logits are unbounded, so lexical tiers need sentinels above their range.
+EXACT_MATCH_SCORE = 1_000_000.0
+PARTIAL_MATCH_SCORE = 1_000.0
 UPSTREAM_COMMIT = "1438aba3fc44ff10573e5a5e1e7cc3c7f9794aff"
 
 
 def index_identity(settings):
+    if settings.embedding == "bge-m3":
+        from .bge import FREQUENCY_SOURCE
+
+        config = {
+            "method": "khamlink-bge-m3-rerank-frequency-v1",
+            "normalization": NORMALIZATION_VERSION,
+            "frequency_source": FREQUENCY_SOURCE,
+            # rerank_floor and semantic_threshold are query-time knobs: they change no
+            # stored vector, so binding them into the index identity only forced a
+            # 268 MB rebuild to retune a number.
+            **{
+                name: getattr(settings, name)
+                for name in [
+                    "embedding",
+                    "bge_model",
+                    "rerank_model",
+                    "rerank_enabled",
+                    "rerank_candidates",
+                    "frequency_weight",
+                ]
+            },
+        }
+        return config, hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     if settings.embedding == "qwen":
         config = {
             "method": "qwen-semantic-v1",
@@ -100,6 +128,18 @@ class IndexBuilder:
         )
 
     def build(self, dataset_id, principal, correlation_id):
+        if self.settings.embedding == "bge-m3":
+            from .bge import build_bge_index
+
+            return build_bge_index(
+                self.settings,
+                self.repository,
+                self.sessions,
+                self.security,
+                dataset_id,
+                principal,
+                correlation_id,
+            )
         if self.settings.embedding == "qwen":
             from .semantic import build_semantic_index
 
@@ -276,6 +316,8 @@ def verify_index_files(settings, folder: Path, expected_manifest: dict):
         required.add("embedding.npz")
     if settings.embedding == "qwen":
         required = {"embedding.json", "passages.json", "vectors.npy"}
+    if settings.embedding == "bge-m3":
+        required = {"embedding.json", "rows.json", "vectors.npy"}
     if set(on_disk["files"]) != required:
         raise ValueError("index_file_set_mismatch")
     for name, checksum in on_disk["files"].items():
@@ -418,6 +460,9 @@ class SearchService:
         self.adapter = None
         self.loaded_index = None
         self.index_lock = threading.Lock()
+        from .expansion import QueryExpander
+
+        self.expander = QueryExpander(settings)
 
     def load_adapter(self, release):
         if not self.settings.semantic_enabled or not release["index_id"]:
@@ -428,9 +473,12 @@ class SearchService:
                     index = session.get(IndexBuild, release["index_id"])
                     if not index or not index.validated or index.dataset_id != release["dataset_id"]:
                         raise ValueError("incompatible_index")
-                    from .semantic import SemanticAdapter
-
-                    adapter_type = SemanticAdapter if self.settings.embedding == "qwen" else HippoRAG2Adapter
+                    if self.settings.embedding == "bge-m3":
+                        from .bge import BgeIndex as adapter_type
+                    elif self.settings.embedding == "qwen":
+                        from .semantic import SemanticAdapter as adapter_type
+                    else:
+                        adapter_type = HippoRAG2Adapter
                     adapter = adapter_type(
                         self.settings, self.settings.data_dir / "indexes" / index.index_id, index.manifest
                     )
@@ -441,11 +489,15 @@ class SearchService:
         release = self.repository.release()
         lexical = self.repository.lexical(query, release["dataset_id"], limit + offset + 1)
         # Cache only exact dictionary queries; natural language never enters cache keys/values.
+        # The query itself, not just the matched entry: several written forms now exact-match
+        # one entry ('อนุรักษ-' and 'อนุรักษ์'), and their prefix tails differ, so keying on
+        # word_id alone served one query's results to another.
         cache_key = (
             (
                 release["revision"],
                 release["dataset_id"],
                 release["index_id"],
+                query,
                 lexical[0]["word_id"],
                 limit,
                 offset,
@@ -465,12 +517,31 @@ class SearchService:
         degraded, mode, degraded_reason = False, "lexical", None
         # Exact lookup has no embedding dependency. Optional related discovery is reached by a new query.
         if not (lexical and lexical[0]["match_type"] == "exact"):
+            # A description is rewritten into definition-shaped probes before retrieval;
+            # if that rewrite fails the search simply runs unexpanded, never degraded.
+            extras = {}
+            if self.expander.wanted(query, exact=False):
+                try:
+                    expansion = self.expander.expand(query)
+                    extras = {
+                        "probes": expansion["terms"] + expansion["words"],
+                        "boost": expansion["words"],
+                    }
+                except Exception:
+                    self.telemetry.emit(
+                        "dependency", correlation_id, {"dependency": "expansion", "status": "failed"}
+                    )
             try:
-                semantic = self.load_adapter(release).retrieve(query, min(200, (limit + offset) * 4))
+                semantic = self.load_adapter(release).retrieve(
+                    query, min(200, (limit + offset) * 4), **extras
+                )
                 mode = semantic["mode"]
                 for hit in semantic["candidates"]:
                     previous = candidates.get(hit["word_id"], {"match_type": "semantic", "lexical": 0.0})
-                    if hit.get("retrieval_score", 0) >= previous.get("retrieval_score", 0):
+                    # Compare against -inf, not 0: cross-encoder scores are unbounded logits
+                    # and a correct-but-weaker answer legitimately scores below zero. A zero
+                    # default silently discarded those, truncating result lists to 1-3 rows.
+                    if hit.get("retrieval_score", 0) >= previous.get("retrieval_score", -math.inf):
                         candidates[hit["word_id"]] = {**previous, **hit}
             except Exception as error:
                 degraded = True
@@ -499,17 +570,36 @@ class SearchService:
                 set(query[i : i + 3] for i in range(max(0, len(query) - 2)))
                 & set(sense["text"][i : i + 3] for i in range(max(0, len(sense["text"]) - 2)))
             ) / max(1, len(query) - 2)
-            score = (
-                self.settings.lexical_weight * max(hit.get("lexical", 0), hit.get("text_lexical", 0))
-                + self.settings.dense_weight * hit.get("dense", 0)
-                + self.settings.graph_weight * hit.get("graph", 0)
-                + self.settings.metadata_weight * metadata
-                + self.settings.context_weight * contextual
-            )
-            if hit["match_type"] == "exact":
-                score = 10.0
-            elif hit["match_type"] == "partial":
-                score += 1.0
+            if self.settings.embedding == "bge-m3":
+                # The adapter has already combined rerank and frequency; re-weighting that
+                # against a char-overlap signal only dilutes it. Typed prefixes still win,
+                # because someone who types a word wants that word, not a description of it.
+                score = hit.get("retrieval_score", 0.0)
+                if hit["match_type"] == "exact":
+                    score = EXACT_MATCH_SCORE
+                elif hit["match_type"] == "partial":
+                    # Every prefix match used to land on exactly PARTIAL_MATCH_SCORE, so
+                    # ordering fell through to a hash and typing 'ความรู' ranked ความรู้
+                    # fifth. Order them the way a reader expects: commonest first, and
+                    # the shortest completion ahead of longer compounds.
+                    score = (
+                        PARTIAL_MATCH_SCORE
+                        + max(score, 0.0)
+                        + frequency_bonus(word["word"], self.settings.frequency_weight)
+                        - 0.01 * len(word["word"])
+                    )
+            else:
+                score = (
+                    self.settings.lexical_weight * max(hit.get("lexical", 0), hit.get("text_lexical", 0))
+                    + self.settings.dense_weight * hit.get("dense", 0)
+                    + self.settings.graph_weight * hit.get("graph", 0)
+                    + self.settings.metadata_weight * metadata
+                    + self.settings.context_weight * contextual
+                )
+                if hit["match_type"] == "exact":
+                    score = 10.0
+                elif hit["match_type"] == "partial":
+                    score += 1.0
             ranked.append(
                 {
                     "word_id": wid,

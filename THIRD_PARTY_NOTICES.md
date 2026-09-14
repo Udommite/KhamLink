@@ -1,8 +1,16 @@
 # Third-party notices
 
-## Selected corpus: thai_dict 1.0
+## Selected corpus: rid 1.0
 
-Thai Wiktionary contributors; compiled by Wannaphong Phatthiyaphaibun / PyThaiNLP. The [artifact release](https://github.com/PyThaiNLP/pythainlp-corpus/releases/tag/thai_dict-v1.0) identifies Thai Wiktionary as its origin and **Creative Commons Attribution-ShareAlike 4.0 International** as its license. This is an artifact-specific determination, not an inference from the corpus repository's general license. [License and legal-code link](https://creativecommons.org/licenses/by-sa/4.0/).
+Office of the Royal Society (สำนักงานราชบัณฑิตยสภา). พจนานุกรมฉบับราชบัณฑิตยสภา editions ๒๕๔๒, ๒๕๕๔ and ๒๕๖๙ (including the marked-incomplete ๒๕๖๙ draft), the Society's coined-term lists for แพทยศาสตร์, จิตวิทยา and ปรัชญา, its English→Thai transliteration list, and its northern, southern and Isaan dialect word lists.
+
+**This content is copyright the Office of the Royal Society and is not redistributable.** It is not distributed with KhamLink, is not committed to this repository, and is never downloaded by the setup script; an operator must supply it and is responsible for holding the right to use it. It is served here on the basis of study and research use. The normalisation pipeline (`etl.py`) preserves the original Thai strings verbatim in a `raw` column; KhamLink adds stable identifiers, splits senses into rows and derives a retrieval index, and none of those derived artifacts change the underlying rights. The Office of the Royal Society does not endorse KhamLink.
+
+The selected artifact, editions, per-edition row counts, coverage limits, normalisation note, size and SHA-256 are recorded in [`sources/rid-1.0.json`](sources/rid-1.0.json). Coverage is uneven and the manifest states it: ๒๕๔๒ is complete ก–ฮ, ๒๕๕๔ covers only ก–ซ, and both ๒๕๖๙ sets cover only ก.
+
+## Alternate corpus: thai_dict 1.0 (no longer the default)
+
+Retained and still selectable by pointing `KHAMLINK_SOURCE_MANIFEST` at it; the CSV staging path and its tests are unchanged. Thai Wiktionary contributors; compiled by Wannaphong Phatthiyaphaibun / PyThaiNLP. The [artifact release](https://github.com/PyThaiNLP/pythainlp-corpus/releases/tag/thai_dict-v1.0) identifies Thai Wiktionary as its origin and **Creative Commons Attribution-ShareAlike 4.0 International** as its license. This is an artifact-specific determination, not an inference from the corpus repository's general license. [License and legal-code link](https://creativecommons.org/licenses/by-sa/4.0/).
 
 The selected artifact, source URLs, registry commit, size, SHA-256, date, author attribution and limitations are recorded in [`sources/thai_dict-1.0.json`](sources/thai_dict-1.0.json). No upstream checksum was supplied; KhamLink pins the measured SHA-256 and verifies subsequent downloads. No large corpus file is included in this source tree's deliverable.
 
@@ -10,9 +18,13 @@ KhamLink's data transformations parse CSV meaning dictionaries, split/number sen
 
 Live per-word Thai Wiktionary article/history links identify contributing pages, but the release has no per-entry revision IDs. Frozen wording is bound to the downloaded artifact checksum, not represented as the current page's exact contents. This corpus is **not an official Office of the Royal Society dictionary**, and neither Wikimedia nor PyThaiNLP endorses KhamLink.
 
+## BGE-M3 and bge-reranker-v2-m3
+
+[BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) and [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3), MIT License, copyright Beijing Academy of Artificial Intelligence. Weights are **not** shipped in this repository; they are downloaded from Hugging Face on first use and cached under the user's Hugging Face cache. `embeddings.parquet` contains vectors derived from BGE-M3 over the source corpus; those vectors inherit the corpus's licensing restrictions, not the model's. Neither BAAI nor Hugging Face endorses KhamLink.
+
 ## PyThaiNLP library
 
-Version **5.3.7**, Apache License 2.0; copyright PyThaiNLP contributors. Its installed package contains its license and notices. [PyThaiNLP source and license](https://github.com/PyThaiNLP/pythainlp). The library license is separate from the selected corpus's CC BY-SA license. No other downloaded PyThaiNLP corpus is approved by this notice.
+Version **5.3.7**, Apache License 2.0; copyright PyThaiNLP contributors. Its installed package contains its license and notices. [PyThaiNLP source and license](https://github.com/PyThaiNLP/pythainlp). The library license is separate from the dictionary corpus's license. The Thai National Corpus and Thai Textbook Corpus word-frequency tables distributed with PyThaiNLP are used for the ranking frequency prior; no other downloaded PyThaiNLP corpus is approved by this notice.
 
 ## HippoRAG
 

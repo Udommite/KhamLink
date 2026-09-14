@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     environment: Literal["local", "test", "production"] = "local"
     database_url: str = "sqlite:///data/khamlink.db"
     data_dir: Path = ROOT / "data"
-    source_manifest: Path = ROOT / "sources/thai_dict-1.0.json"
+    source_manifest: Path = ROOT / "sources/rid-1.0.json"
+    corpus_dir: Path = Field(ROOT / "data/corpus", validation_alias="KHAMLINK_CORPUS_DIR")
     query_limit: int = Field(300, ge=1, le=2000)
     context_limit: int = Field(3000, ge=1, le=20000)
     report_limit: int = Field(1000, ge=1, le=4000)
@@ -50,8 +51,8 @@ class Settings(BaseSettings):
     provider_timeout: float = Field(
         30.0, gt=0, le=60, validation_alias=AliasChoices("LLM_TIMEOUT", "KHAMLINK_PROVIDER_TIMEOUT")
     )
-    embedding: Literal["qwen", "lsa", "sentence-transformers"] = Field(
-        "qwen", validation_alias=AliasChoices("EMBEDDING_PROVIDER", "KHAMLINK_EMBEDDING")
+    embedding: Literal["qwen", "lsa", "sentence-transformers", "bge-m3"] = Field(
+        "bge-m3", validation_alias=AliasChoices("EMBEDDING_PROVIDER", "KHAMLINK_EMBEDDING")
     )
     embedding_model: str = Field(
         "Qwen/Qwen3-Embedding-4B",
@@ -69,6 +70,17 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(64, ge=1, le=128, validation_alias="EMBEDDING_BATCH_SIZE")
     embedding_workers: int = Field(4, ge=1, le=8, validation_alias="EMBEDDING_WORKERS")
     embedding_dimensions: int = Field(1024, ge=32, le=2560, validation_alias="EMBEDDING_DIMENSIONS")
+    # BGE-M3 pipeline: precomputed dense index, cross-encoder rerank, corpus-frequency prior.
+    bge_model: str = Field("BAAI/bge-m3", validation_alias="KHAMLINK_BGE_MODEL")
+    rerank_model: str = Field("BAAI/bge-reranker-v2-m3", validation_alias="KHAMLINK_RERANK_MODEL")
+    rerank_enabled: bool = Field(True, validation_alias="KHAMLINK_RERANK_ENABLED")
+    rerank_candidates: int = Field(50, ge=1, le=400, validation_alias="KHAMLINK_RERANK_CANDIDATES")
+    # Cross-encoder logits go negative when nothing in the corpus genuinely matches,
+    # which is the signal the app reports as "no reliable result".
+    rerank_floor: float = Field(0.0, ge=-20, le=20, validation_alias="KHAMLINK_RERANK_FLOOR")
+    frequency_weight: float = Field(0.6, ge=0, le=5, validation_alias="KHAMLINK_FREQUENCY_WEIGHT")
+    query_expansion: bool = Field(False, validation_alias="KHAMLINK_QUERY_EXPANSION")
+    expansion_min_length: int = Field(12, ge=1, le=200, validation_alias="KHAMLINK_EXPANSION_MIN_LENGTH")
     semantic_enabled: bool = True
     dense_dimensions: int = Field(128, ge=8, le=1024)
     lexical_weight: float = Field(0.35, ge=0, le=1)
@@ -83,6 +95,9 @@ class Settings(BaseSettings):
     ppr_damping: float = Field(0.5, gt=0, lt=1)
     passage_seed_weight: float = Field(0.05, gt=0, le=1)
     sense_margin: float = Field(0.12, ge=0, le=1)
+    # Cross-encoder logits, not cosines: senses that genuinely differ separate by whole
+    # units here, where the bi-encoder separates them by ~0.01.
+    sense_logit_margin: float = Field(1.0, ge=0, le=20, validation_alias="KHAMLINK_SENSE_LOGIT_MARGIN")
     production_policy_ack: bool = False
 
     @model_validator(mode="after")

@@ -86,21 +86,37 @@ class ContextService:
                 adapter = self.search.load_adapter(self.repository.release())
                 # Remove the selected span before scoring so the headword does not pick its own sense.
                 context = selection.text[: selection.start] + " " + selection.text[selection.end :]
-                query = (
-                    adapter.embedding.encode_query(context)
-                    if hasattr(adapter.embedding, "encode_query")
-                    else adapter.embedding.encode([context])[0]
-                )
-                vectors = adapter.embedding.encode([s["text"] for s in senses])
-                scores = vectors @ query
-                order = np.argsort(-scores, kind="stable")
-                if (
-                    scores[order[0]] >= self.settings.semantic_threshold
-                    and scores[order[0]] - scores[order[1]] >= self.settings.sense_margin
-                ):
+                # Prefer the cross-encoder. Measured on this corpus, the bi-encoder's gap
+                # between two senses of one word is ~0.01 (max 0.07 over 40 words), so no
+                # absolute cosine margin can separate them and the old 0.12 resolved none
+                # of them — every polysemous word came back "ambiguous". The cross-encoder
+                # reads context and sense together and separates them in logit space.
+                texts = [s["text"] for s in senses]
+                scores = getattr(adapter, "score_senses", lambda *_: None)(context, texts)
+                if scores is not None:
+                    scores = np.asarray(scores, dtype="float32")
+                    order = np.argsort(-scores, kind="stable")
+                    resolved = scores[order[0]] - scores[order[1]] >= self.settings.sense_logit_margin
+                else:
+                    query = (
+                        adapter.embedding.encode_query(context)
+                        if hasattr(adapter.embedding, "encode_query")
+                        else adapter.embedding.encode([context])[0]
+                    )
+                    scores = adapter.embedding.encode(texts) @ query
+                    order = np.argsort(-scores, kind="stable")
+                    resolved = (
+                        scores[order[0]] >= self.settings.semantic_threshold
+                        and scores[order[0]] - scores[order[1]] >= self.settings.sense_margin
+                    )
+                if resolved:
                     selected_ids, ambiguous = [senses[order[0]]["definition_id"]], False
             except Exception:
-                pass
+                # Visible rather than silent: an adapter failure and a genuinely ambiguous
+                # word produced the same output before, so neither could be diagnosed.
+                self.search.telemetry.emit(
+                    "dependency", correlation_id, {"dependency": "sense_selection", "status": "failed"}
+                )
         explanation = (
             self.grounding.fallback("ambiguous")
             if ambiguous

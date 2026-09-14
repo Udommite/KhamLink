@@ -84,9 +84,34 @@ def load_manifest(path: Path) -> dict:
     return manifest
 
 
+def approved_manifest(settings: Settings) -> dict:
+    """Load the manifest for whichever corpus shape this deployment is configured for."""
+    from .rid import CORPUS_FORMAT, load_rid_manifest
+
+    try:
+        declared = json.loads(settings.source_manifest.read_text(encoding="utf-8")).get("format")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        declared = None
+    if declared == CORPUS_FORMAT:
+        return load_rid_manifest(settings.source_manifest)
+    return load_manifest(settings.source_manifest)
+
+
 def acquire(settings: Settings) -> Path:
     """Pinned artifact download. Never trust an unpinned live latest_version registry."""
-    manifest = load_manifest(settings.source_manifest)
+    from .rid import CORPUS_FORMAT
+
+    manifest = approved_manifest(settings)
+    if manifest.get("format") == CORPUS_FORMAT:
+        # Licensed corpus: supplied by the operator, verified in place, never fetched.
+        path = settings.corpus_dir / manifest["files"]["senses"]
+        if not path.exists():
+            raise DomainError(
+                "CORPUS_MISSING", f"ไม่พบไฟล์ corpus ที่ {path} กรุณาตั้งค่า KHAMLINK_CORPUS_DIR", 409
+            )
+        if sha256_file(path) != manifest["sha256"]:
+            raise DomainError("CHECKSUM_MISMATCH", "ไฟล์ corpus ไม่ตรงกับรุ่นที่อนุมัติ", 409)
+        return path
     folder = settings.data_dir / "cache" / manifest["corpus"] / manifest["version"]
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "thai_dictionary.csv"
@@ -137,7 +162,7 @@ class IngestionService:
             or source.checksum != manifest.get("sha256")
             or manifest.get("provenance") != "SOURCE_DATA"
             or manifest.get("approved") is not True
-            or manifest.get("official_royal_society") is not False
+            or not isinstance(manifest.get("official_royal_society"), bool)
         ):
             defects.add("SOURCE_INTEGRITY_FAILED")
         words = session.scalars(select(Word).where(Word.dataset_id == source.dataset_id)).all()
@@ -156,6 +181,13 @@ class IngestionService:
             except (DomainError, ValueError, TypeError):
                 defects.add("WORD_INTEGRITY_FAILED")
         senses = session.scalars(select(Definition).where(Definition.dataset_id == source.dataset_id)).all()
+        from .rid import CORPUS_FORMAT, RECORD_PORTALS
+
+        # An exact allow-list, not a bare scheme: relaxing this to "https://" accepted any
+        # origin as a source link, which is more than the new corpus ever needed.
+        record_prefixes = (
+            RECORD_PORTALS if manifest.get("format") == CORPUS_FORMAT else ("https://th.wiktionary.org/wiki/",)
+        )
         covered = set()
         seen = set()
         for sense in senses:
@@ -166,7 +198,7 @@ class IngestionService:
                     or sense.word_id not in word_ids
                     or sense.provenance != "SOURCE_DATA"
                     or sense.number < 1
-                    or not sense.record_url.startswith("https://th.wiktionary.org/wiki/")
+                    or not sense.record_url.startswith(record_prefixes)
                     or (sense.word_id, sense.number) in seen
                 ):
                     raise ValueError("invalid_sense")
@@ -386,7 +418,7 @@ class IngestionService:
             source = session.get(Dataset, dataset_id)
             if not source or source.state not in {"Validated", "Superseded", "Published"}:
                 raise DomainError("INVALID_STATE", "ต้องตรวจสอบข้อมูลก่อนเผยแพร่", 409)
-            if source.manifest != load_manifest(self.settings.source_manifest):
+            if source.manifest != approved_manifest(self.settings):
                 raise DomainError("UNAPPROVED_SOURCE", "manifest เปลี่ยน ต้องตรวจสอบและนำเข้าใหม่", 409)
             if index_id:
                 index = session.get(IndexBuild, index_id)

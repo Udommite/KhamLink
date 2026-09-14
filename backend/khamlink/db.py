@@ -65,6 +65,23 @@ class Word(Base):
     )
 
 
+class WordAlias(Base):
+    """Alternative written forms of one entry.
+
+    RID stores variants comma-joined in a single headword ('อนุรักษ-, อนุรักษ์'), so an
+    exact lookup of 'อนุรักษ์' would otherwise miss the entry it belongs to.
+    """
+
+    __tablename__ = "source_word_aliases"
+    dataset_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    alias: Mapped[str] = mapped_column(String(512), primary_key=True)
+    word_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["dataset_id", "word_id"], ["source_words.dataset_id", "source_words.word_id"]),
+        Index("ix_word_aliases_lookup", "dataset_id", "alias"),
+    )
+
+
 class Definition(Base):
     __tablename__ = "source_definitions"
     dataset_id: Mapped[str] = mapped_column(String(80), primary_key=True)

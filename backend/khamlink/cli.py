@@ -12,10 +12,11 @@ from alembic.config import Config
 
 from .config import ROOT, Settings
 from .db import ActiveRelease, IndexBuild, make_engine, sessions
-from .ingestion import IngestionService, acquire
+from .ingestion import IngestionService, acquire, approved_manifest
 from .observability import configure_logging
 from .repository import SQLLexicalRepository
 from .retrieval import IndexBuilder, index_identity
+from .rid import CORPUS_FORMAT, RIDIngestionService
 from .security import Security
 
 
@@ -46,7 +47,10 @@ def bootstrap(settings, token=None, demo=False):
     correlation = str(uuid.uuid4())
     security.authorize(principal, "import", correlation)
     path = acquire(settings)
-    ingest = IngestionService(settings, factory, security)
+    if approved_manifest(settings).get("format") == CORPUS_FORMAT:
+        ingest = RIDIngestionService(settings, factory, security)
+    else:
+        ingest = IngestionService(settings, factory, security)
     result = ingest.stage(path, principal, correlation)
     print(json.dumps(result, ensure_ascii=False), flush=True)
     with factory() as session:
@@ -74,9 +78,7 @@ def bootstrap(settings, token=None, demo=False):
         json.dumps(
             {
                 **published,
-                "passages": manifest["passages"],
-                "phrases": manifest["phrases"],
-                "triples": manifest["triples"],
+                **{k: manifest[k] for k in ("passages", "phrases", "triples") if k in manifest},
             },
             ensure_ascii=False,
         ),

@@ -1,0 +1,39 @@
+{
+  "manifest_version": 1,
+  "format": "rid-parquet",
+  "source_id": "orst-rid-normalised",
+  "name": "พจนานุกรมฉบับราชบัณฑิตยสภา และศัพท์บัญญัติ/ภาษาถิ่น (ชุดข้อมูลที่ทำให้เป็นมาตรฐานแล้ว)",
+  "corpus": "rid",
+  "version": "1.0",
+  "retrieved_at": "2026-09-14",
+  "upstream_origin": "https://dictionary.orst.go.th/",
+  "license": "ORST-ALL-RIGHTS-RESERVED",
+  "license_url": "https://www.orst.go.th/",
+  "redistribution_permitted": false,
+  "sha256": "4175e958ab212e044d367560bb38134b4a07b59ddcced7900c003e3597b34a7a",
+  "size_bytes": 10236530,
+  "files": {
+    "senses": "senses.parquet",
+    "relations": "relations.parquet",
+    "embeddings": "embeddings.parquet"
+  },
+  "editions": {
+    "royal_2542": 37706,
+    "royal_2554": 13395,
+    "subject_medical": 4178,
+    "royal_2569": 4138,
+    "transliteration": 2256,
+    "subject_psychology": 1459,
+    "royal_2569_draft": 1074,
+    "dialect_north": 543,
+    "dialect_south": 452,
+    "dialect_isaan": 448,
+    "subject_philosophy": 349
+  },
+  "normalization": "etl.py — per-sense rows, original Thai text preserved verbatim in `raw`",
+  "provenance": "SOURCE_DATA",
+  "official_royal_society": true,
+  "approved": true,
+  "notice": "ความหมายมาจากพจนานุกรมฉบับราชบัณฑิตยสภาและเอกสารศัพท์บัญญัติ/ภาษาถิ่นของสำนักงานราชบัณฑิตยสภา เนื้อหามีลิขสิทธิ์ของสำนักงานราชบัณฑิตยสภา ใช้เพื่อการศึกษาและค้นคว้า ไม่อนุญาตให้เผยแพร่ต่อ คำอธิบายที่ AI เรียบเรียงและความคิดเห็นผู้ใช้อยู่คนละส่วนจากข้อมูลต้นฉบับ",
+  "upstream_label": "สำนักงานราชบัณฑิตยสภา · ทำให้เป็นมาตรฐานด้วย etl.py"
+}

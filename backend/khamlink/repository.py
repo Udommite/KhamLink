@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from sqlalchemy import or_, select
 
-from .db import ActiveRelease, CuratedMetadata, Dataset, Definition, Relationship, Word
+from .db import ActiveRelease, CuratedMetadata, Dataset, Definition, Relationship, Word, WordAlias
 from .domain import DomainError, RelationType, normalize
 
 
@@ -37,7 +37,7 @@ class SQLLexicalRepository:
         return (
             source.manifest.get("approved") is True
             and source.manifest.get("provenance") == "SOURCE_DATA"
-            and source.manifest.get("official_royal_society") is False
+            and isinstance(source.manifest.get("official_royal_society"), bool)
             and source.version
             and source.source_id
         )
@@ -71,6 +71,18 @@ class SQLLexicalRepository:
                     Word.word_id == key if key.startswith("w_") else Word.normalized == normalize(key),
                 )
             )
+            if not word and not key.startswith("w_"):
+                # A reader types one written form; RID files several under one entry
+                # ('อนุรักษ-, อนุรักษ์'), so the display headword alone would not match.
+                word = session.scalar(
+                    select(Word)
+                    .join(
+                        WordAlias,
+                        (Word.dataset_id == WordAlias.dataset_id) & (Word.word_id == WordAlias.word_id),
+                    )
+                    .where(WordAlias.dataset_id == dataset_id, WordAlias.alias == normalize(key))
+                    .order_by(Word.word_id)
+                )
             if not word:
                 raise DomainError("WORD_NOT_FOUND", "ไม่พบคำนี้ในชุดข้อมูลที่เผยแพร่ ลองกลับไปค้นหาคำอื่น", 404)
             senses = session.scalars(
@@ -94,7 +106,7 @@ class SQLLexicalRepository:
                 "name": source.manifest["name"],
                 "license": source.manifest["license"],
                 "license_url": source.manifest["license_url"],
-                "official_royal_society": False,
+                "official_royal_society": source.manifest["official_royal_society"],
                 "provenance": "SOURCE_DATA",
             }
             definitions = [
@@ -105,7 +117,9 @@ class SQLLexicalRepository:
                     "part_of_speech": s.part_of_speech,
                     "metadata": s.metadata_fields,
                     "record_url": s.record_url,
-                    "history_url": "https://th.wiktionary.org/w/index.php?title="
+                    "history_url": s.record_url
+                    if source.manifest.get("format")
+                    else "https://th.wiktionary.org/w/index.php?title="
                     + quote(word.word)
                     + "&action=history",
                     "provenance": "SOURCE_DATA",
@@ -149,38 +163,60 @@ class SQLLexicalRepository:
             }
 
     def lexical(self, query: str, dataset_id: str, limit: int) -> list[dict]:
+        """Exact and prefix matches over every written form of an entry, not only its
+        display headword. A dataset with no alias rows behaves exactly as before."""
         escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         with self.sessions() as session:
-            exact = list(
-                session.scalars(select(Word).where(Word.dataset_id == dataset_id, Word.normalized == query))
-            )
-            partial = list(
+            exact = set(
                 session.scalars(
-                    select(Word)
-                    .where(
-                        Word.dataset_id == dataset_id,
-                        Word.normalized != query,
-                        Word.normalized.like(escaped + "%", escape="\\"),
-                    )
-                    .order_by(Word.normalized, Word.word_id)
-                    .limit(limit)
+                    select(Word.word_id).where(Word.dataset_id == dataset_id, Word.normalized == query)
                 )
             )
-            return [
-                {
-                    "word_id": w.word_id,
-                    "match_type": "exact" if w.normalized == query else "partial",
-                    "lexical": 1.0 if w.normalized == query else 0.8,
-                }
-                for w in exact + partial
+            exact |= set(
+                session.scalars(
+                    select(WordAlias.word_id).where(
+                        WordAlias.dataset_id == dataset_id, WordAlias.alias == query
+                    )
+                )
+            )
+            forms = []
+            for table, column in ((Word, Word.normalized), (WordAlias, WordAlias.alias)):
+                forms.extend(
+                    session.execute(
+                        select(table.word_id, column)
+                        .where(
+                            table.dataset_id == dataset_id,
+                            column != query,
+                            column.like(escaped + "%", escape="\\"),
+                        )
+                        .order_by(column, table.word_id)
+                        .limit(limit)
+                    ).all()
+                )
+            partial, seen = [], set(exact)
+            for word_id, _form in sorted(forms, key=lambda row: (row[1], row[0])):
+                if word_id in seen:
+                    continue
+                seen.add(word_id)
+                partial.append(word_id)
+                if len(partial) >= limit:
+                    break
+            return [{"word_id": w, "match_type": "exact", "lexical": 1.0} for w in sorted(exact)] + [
+                {"word_id": w, "match_type": "partial", "lexical": 0.8} for w in partial
             ]
 
     def word_forms(self, dataset_id: str) -> dict[str, str]:
+        """Every form Context Lens may detect in running text, aliases included."""
         with self.sessions() as session:
-            return {
+            forms = {
                 w.normalized: w.word_id
                 for w in session.scalars(select(Word).where(Word.dataset_id == dataset_id))
             }
+            for alias, word_id in session.execute(
+                select(WordAlias.alias, WordAlias.word_id).where(WordAlias.dataset_id == dataset_id)
+            ).all():
+                forms.setdefault(alias, word_id)
+            return forms
 
     def passages(self, dataset_id: str) -> list[dict]:
         with self.sessions() as session:
