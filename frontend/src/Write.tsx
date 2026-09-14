@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Editor from './Editor'
 import WordCard from './WordCard'
 import { api } from './api'
-import { countWords, formalityLabels, type Doc, type Formality } from './docs'
+import { countWords, excerpt, when, formalityLabels, type Doc, type Formality } from './docs'
 import type { Related, Review, Word } from './types'
 import './write.css'
 
@@ -28,18 +28,21 @@ export function replaceSpan(body: string, range: { start: number; end: number; t
 /** Keep saved documents and the native Thai editor inside one quiet writing workspace. */
 export default function Write(props: WriteProps) {
   const doc = props.docs.find(item => item.id === props.docId)
+  const [gallery, setGallery] = useState(!doc)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  useEffect(() => { setGallery(!props.docId) }, [props.docId])
   return <section className="write-page">
     <div className="write-toolbar">
-      <label className="write-picker">YOUR DOCUMENTS
-        <select aria-label="Open document" value={doc?.id || ''} onChange={event => props.onOpen(event.target.value)}>
-          <option value="" disabled>Choose a document</option>
-          {props.docs.map(item => <option key={item.id} value={item.id}>{item.title || 'Untitled document'}</option>)}
-        </select>
-      </label>
-      <button className="write-button" onClick={props.onCreate}>+ New document</button>
-      <span className="write-local">Private to this browser</span>
+      <button className="write-button" aria-expanded={gallery} onClick={() => setGallery(!gallery)}>▦ เอกสารของฉัน</button>
+      <button className="write-button" onClick={props.onCreate}>+ เอกสารใหม่</button>
+      <span className="write-local">เก็บไว้ในเบราว์เซอร์นี้</span>
     </div>
-    {doc ? <WritingDocument key={doc.id} {...props} doc={doc} /> : <div className="write-empty">
+    {gallery && props.docs.length > 0 && <section className="document-gallery" aria-label="เอกสารของฉัน"><h1>พื้นที่ของความคิด</h1><div className="doc-grid">{props.docs.map(item => <article className="doc-card" key={item.id}>
+      <button className="doc-open" onClick={() => { props.onOpen(item.id); setGallery(false) }}><strong>{item.title || 'เอกสารไม่มีชื่อ'}</strong><p>{excerpt(item) || 'ยังไม่มีข้อความ เริ่มเขียนได้เลย'}</p><small>{countWords(item.body)} คำ · {when(item.updated)}</small></button>
+      <button className="write-text-button" aria-label={`ลบ ${item.title}`} onClick={() => setDeleting(item.id)}>ลบเอกสาร</button>
+      {deleting === item.id && <div className="write-delete" role="alert"><span>ลบเอกสารนี้หรือไม่?</span><button onClick={() => setDeleting(null)}>เก็บไว้</button><button onClick={() => { props.onDelete(item.id); setDeleting(null) }}>ยืนยันลบ</button></div>}
+    </article>)}</div></section>}
+    {doc ? <div hidden={gallery}><WritingDocument key={doc.id} {...props} doc={doc} /></div> : props.docs.length ? null : <div className="write-empty">
       <span className="write-eyebrow">A LITTLE SPACE TO THINK</span>
       <h1>ให้ความคิด<br />ค่อย ๆ เป็นคำ</h1>
       <p>Write freely. Select a word to discover what it could become.</p>
@@ -61,8 +64,10 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
   const [error, setError] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+  const [saving, setSaving] = useState(false)
   const ticket = useRef(0)
   const term = lookupOverride || selection?.tokenId || selection?.text.trim() || ''
+  useEffect(() => { setSaving(true); const timer = setTimeout(() => setSaving(false), 450); return () => clearTimeout(timer) }, [doc.body, doc.title])
 
   /** A new selection starts a fresh lookup; alternatives keep the original replacement span. */
   useEffect(() => { setLookupOverride('') }, [selection?.start, selection?.end, selection?.text])
@@ -113,13 +118,13 @@ function WritingDocument({ doc, onChange, onDelete, onExplore, onCompare }: Writ
 
   return <div className="write-workspace">
     <section className="write-paper" aria-label="Writing surface">
-      <div className="write-paper-top"><span className="write-eyebrow">WRITE / YOUR OWN WORDS</span><span className="write-count">{countWords(doc.body).toLocaleString()} words</span></div>
+      <div className="write-paper-top"><span className="write-save-status" data-saving={saving} role="status">{saving ? 'กำลังบันทึก…' : 'บันทึกในเบราว์เซอร์แล้ว'}</span><span className="write-count" key={countWords(doc.body)}>{countWords(doc.body).toLocaleString()} คำ</span></div>
       <input className="write-title" aria-label="Document title" value={doc.title} onChange={event => onChange(doc.id, { title: event.target.value })} placeholder="Untitled document" />
       <div className="write-goals">
         <label>Tone <select aria-label="Writing tone" value={doc.formality} onChange={event => onChange(doc.id, { formality: event.target.value as Formality })}>{Object.entries(formalityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
         <button className="write-button write-review" disabled={busy || !doc.body.trim()} onClick={() => void analyze()}>{busy ? 'Reading your words…' : 'Review writing ↗'}</button>
       </div>
-      <Editor value={doc.body} onChange={updateBody} suggestions={review?.suggestions || []} tokens={review?.tokens || []} activeId={active} selection={selection} onActivate={setActive} onSelect={setSelection} placeholder="เริ่มเขียนที่นี่… เลือกคำที่อยากรู้จักให้มากขึ้น" />
+      <Editor value={doc.body} onChange={updateBody} suggestions={review?.suggestions || []} tokens={review?.tokens || []} activeId={active} selection={selection} onActivate={setActive} onSelect={setSelection} placeholder="เริ่มเขียนที่นี่… เลือกคำที่อยากรู้จักให้มากขึ้น" alternatives={selection && !lookupOverride ? [ ...(related?.relationships || []).map(edge => ({ word:edge.word, description:edge.description, ai:false })), ...(related?.semantic_neighbours || []).map(node => ({ word:node.word, description:node.description, ai:true })) ].slice(0, 4) : []} onAlternative={setLookupOverride} />
       <footer className="write-paper-footer"><span>Your words stay in this browser. Review sends text to the language service.</span><button className="write-text-button" onClick={() => setDeletePending(!deletePending)}>Delete document</button></footer>
       {deletePending && <div className="write-delete" role="alert"><span>Delete this document? You can undo this during the session.</span><button className="write-button" onClick={() => setDeletePending(false)}>Keep it</button><button className="write-button" onClick={() => onDelete(doc.id)}>Delete</button></div>}
     </section>

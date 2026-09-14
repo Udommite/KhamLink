@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { Suggestion, Token } from './types'
+import { indentEdit, markdownSpans } from './editor-format'
 
 /* The writing surface.
 
@@ -27,6 +28,8 @@ interface Props {
       out what is wrong on the left is the thing that makes a rail feel bolted on. */
   popover?: React.ReactNode
   onDismissPopover?: () => void
+  alternatives?: { word: string; description: string; ai: boolean }[]
+  onAlternative?: (word: string) => void
 }
 
 interface Piece { start: number; end: number; suggestion?: Suggestion; selected?: boolean }
@@ -62,10 +65,42 @@ export function pieces(length: number, suggestions: Suggestion[], selection: Pro
   return split
 }
 
-export default function Editor({ value, onChange, suggestions, tokens, activeId, selection, onActivate, onSelect, placeholder, popover, onDismissPopover }: Props) {
+export default function Editor({ value, onChange, suggestions, tokens, activeId, selection, onActivate, onSelect, placeholder, popover, onDismissPopover, alternatives = [], onAlternative }: Props) {
   const area = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
   const [anchor, setAnchor] = React.useState<{ top: number; left: number } | null>(null)
+  const [preview, setPreview] = React.useState(false)
+  const escapeTab = useRef(false)
+  const fallbackUndo = useRef<{ before: string; after: string } | null>(null)
+  const syntax = useMemo(() => markdownSpans(value).map(span => ({ ...span, start:Array.from(value.slice(0, span.start)).length, end:Array.from(value.slice(0, span.end)).length })), [value])
+
+  function renderText(start: number, end: number) {
+    const boundaries = [...new Set([start, end, ...syntax.flatMap(span => [span.start, span.end]).filter(at => at > start && at < end)])].sort((a, b) => a - b)
+    return boundaries.slice(0, -1).map((from, i) => <span key={from} className={syntax.filter(span => span.start <= from && span.end >= boundaries[i + 1]).map(span => `md-${span.kind}`).join(' ')}>{characters.slice(from, boundaries[i + 1]).join('')}</span>)
+  }
+
+  /** Chromium's native edit command preserves textarea undo and composition behavior.
+   * The fallback records its own one-step inverse only for browsers without that command. */
+  function replaceNative(from: number, to: number, text: string, start: number, end: number) {
+    const node = area.current
+    if (!node) return
+    node.focus(); node.setSelectionRange(from, to)
+    const before = node.value
+    let applied = false
+    try { applied = document.execCommand('insertText', false, text) } catch { /* Use the plain-text fallback. */ }
+    if (!applied) { node.setRangeText(text, from, to, 'end'); fallbackUndo.current = { before, after:node.value } }
+    onChange(node.value)
+    requestAnimationFrame(() => node.setSelectionRange(start, end))
+  }
+
+  function format(marker: string, line = false) {
+    const node = area.current
+    if (!node) return
+    const start = node.selectionStart, end = node.selectionEnd
+    const from = line ? node.value.lastIndexOf('\n', start - 1) + 1 : start
+    const selected = node.value.slice(from, end)
+    replaceNative(from, end, marker + selected + (line ? '' : marker), start + marker.length, end + marker.length)
+  }
 
   // Thai stays inside the BMP, so code points and UTF-16 units agree — but the backend
   // counts code points, so index through the same unit it does rather than assume.
@@ -79,7 +114,7 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
     if (!node) return
     node.style.height = 'auto'
     node.style.height = `${node.scrollHeight}px`
-  }, [value])
+  }, [value, preview])
 
   const measure = useCallback(() => {
     const mark = activeId ? mirror.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(activeId)}"]`) : null
@@ -137,10 +172,25 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
   }, [characters, tokens, onSelect])
 
   return (
-    <div className="sheet">
+    <>
+    <div className="editor-toolbar" role="toolbar" aria-label="จัดรูปแบบข้อความ">
+      <button type="button" aria-label="ตัวหนา" disabled={preview} onMouseDown={event => event.preventDefault()} onClick={() => format('**')}>B</button>
+      <button type="button" aria-label="ตัวเอียง" disabled={preview} onMouseDown={event => event.preventDefault()} onClick={() => format('*')}>I</button>
+      <button type="button" aria-label="หัวเรื่อง" disabled={preview} onMouseDown={event => event.preventDefault()} onClick={() => format('# ', true)}>H</button>
+      <button type="button" aria-label="รายการ" disabled={preview} onMouseDown={event => event.preventDefault()} onClick={() => format('- ', true)}>≡</button>
+      <button type="button" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'แก้ไขข้อความ' : 'ดูรูปแบบ'}</button>
+      <span>Tab ย่อหน้า · Esc แล้ว Tab ออก</span>
+    </div>
+    {preview && <div className="markdown-preview" aria-label="ตัวอย่างรูปแบบ Markdown">{value.split('\n').map((line, index) => {
+      const inline = (text: string) => text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, i) => part.startsWith('**') ? <strong key={i}>{part.slice(2,-2)}</strong> : part.startsWith('*') ? <em key={i}>{part.slice(1,-1)}</em> : part)
+      if (/^#{1,6} /.test(line)) return <h2 key={index}>{inline(line.replace(/^#{1,6} /, ''))}</h2>
+      if (/^[-*+] /.test(line)) return <div key={index} className="preview-list">• {inline(line.slice(2))}</div>
+      return <div key={index}>{inline(line) || '\u00a0'}</div>
+    })}</div>}
+    <div className="sheet" hidden={preview}>
       <div className="mirror" ref={mirror} aria-hidden="true">
         {painted.map(piece => {
-          const text = characters.slice(piece.start, piece.end).join('')
+          const text = renderText(piece.start, piece.end)
           if (!piece.suggestion && !piece.selected) return <React.Fragment key={piece.start}>{text}</React.Fragment>
           return (
             <mark
@@ -161,6 +211,19 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
         onChange={event => onChange(event.target.value)}
         onSelect={reportSelection}
         onKeyUp={reportSelection}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return
+          if (event.key === 'Escape') { escapeTab.current = true; return }
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey && fallbackUndo.current?.after === value) {
+            event.preventDefault(); onChange(fallbackUndo.current.before); fallbackUndo.current = null; return
+          }
+          if (event.key !== 'Tab') { escapeTab.current = false; return }
+          if (escapeTab.current) { escapeTab.current = false; return }
+          event.preventDefault()
+          const node = event.currentTarget
+          const edit = indentEdit(node.value, node.selectionStart, node.selectionEnd, event.shiftKey)
+          replaceNative(edit.from, edit.to, edit.text, edit.start, edit.end)
+        }}
         // React's onSelect does not fire for every way a selection can end; a mouse
         // drag that finishes outside the textarea is the common one.
         onMouseUp={reportSelection}
@@ -192,5 +255,7 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
         </div>
       )}
     </div>
+    {selection && alternatives.length > 0 && <div className="inline-alternatives" role="group" aria-label="คำใกล้เคียงสำหรับข้อความที่เลือก"><span>คำใกล้เคียง · เลือกเพื่ออ่านความหมาย</span>{alternatives.map((item, index) => <button key={`${item.word}-${index}`} onClick={() => onAlternative?.(item.word)}>{item.word}{item.ai ? ' · AI' : ''}</button>)}</div>}
+    </>
   )
 }

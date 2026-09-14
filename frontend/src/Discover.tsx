@@ -5,6 +5,7 @@ import SemanticGraph from './SemanticGraph'
 import WordCard from './WordCard'
 import { expandNetwork, readableText, validQuery, type Network } from './discovery-data'
 import type { Candidate, Config, Related, SearchResults, Word } from './types'
+import { flushSync } from 'react-dom'
 
 export interface DiscoverRequest { term?: string; compare?: string[]; key: number }
 interface Props { config?: Config; request?: DiscoverRequest; onWrite: () => void }
@@ -104,17 +105,54 @@ export default function Discover({ config, request, onWrite }: Props) {
   const [results, setResults] = useState<SearchResults>()
   const [error, setError] = useState('')
   const [mapError, setMapError] = useState(false)
-  const [intro, setIntro] = useState(true)
+  const [intro, setIntro] = useState(() => {
+    try { return !sessionStorage.getItem('khamlink.intro.v1') && !matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
+  })
+  const [generation, setGeneration] = useState(0)
+  const [collapsing, setCollapsing] = useState(false)
   const [history, setHistory] = useState<string[]>([])
   const operation = useRef<AbortController | null>(null)
   const limit = config?.query_limit || 300
+  type Snapshot = { network: Network; activeId: string; path: string[]; word?: Word; related?: Related; query: string; results?: SearchResults }
+  const current = useRef<Snapshot>({ network, activeId, path, word, related, query, results })
+  current.current = { network, activeId, path, word, related, query, results }
+  const undo = useRef<{ entries: Snapshot[]; cursor: number }>({ entries: [], cursor: -1 })
+
+  useEffect(() => {
+    const stepBack = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' || event.shiftKey || (event.target as HTMLElement).closest('input, textarea, [contenteditable="true"]') || document.getElementById('discover-main')?.closest('[hidden]')) return
+      const stack = undo.current
+      if (stack.cursor < 0) return
+      event.preventDefault(); operation.current?.abort()
+      const saved = stack.entries[stack.cursor--]
+      setNetwork(saved.network); setActiveId(saved.activeId); setPath(saved.path); setWord(saved.word); setRelated(saved.related); setQuery(saved.query); setResults(saved.results); setBusy(false); setCollapsing(false); setError(''); setCardOpen(true)
+    }
+    addEventListener('keydown', stepBack)
+    return () => removeEventListener('keydown', stepBack)
+  }, [])
 
   /** Commit the card first; slow or unavailable graph expansion must not hide the definition. */
   const reveal = useCallback(async (found: Word, controller: AbortController, append: boolean, showCard: boolean) => {
     if (controller.signal.aborted) return
-    setWord(found); setRelated(undefined); setActiveId(found.word_id); setCardOpen(showCard)
-    setPath(previous => append ? previous.includes(found.word_id) ? previous.slice(0, previous.indexOf(found.word_id) + 1) : [...previous, found.word_id] : [found.word_id])
-    setNetwork(previous => expandNetwork(append ? previous : { nodes: [], links: [] }, found))
+    if (current.current.word && current.current.activeId !== found.word_id) {
+      const stack = undo.current
+      stack.entries = [...stack.entries.slice(0, stack.cursor + 1), current.current].slice(-40)
+      stack.cursor = stack.entries.length - 1
+    }
+    if (!append && current.current.word && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setCollapsing(true)
+      await new Promise(resolve => setTimeout(resolve, 180))
+      if (controller.signal.aborted) { setCollapsing(false); return }
+    }
+    const commit = () => {
+      setWord(found); setRelated(undefined); setActiveId(found.word_id); setCardOpen(showCard)
+      setPath(previous => append ? previous.includes(found.word_id) ? previous.slice(0, previous.indexOf(found.word_id) + 1) : [...previous, found.word_id] : [found.word_id])
+      setNetwork(previous => expandNetwork(append ? previous : { nodes: [], links: [] }, found))
+      if (!append) setGeneration(value => value + 1)
+      setCollapsing(false)
+    }
+    if (!append && document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(() => flushSync(commit))
+    else commit()
     try {
       const map = await api<Related>(`/words/${encodeURIComponent(found.word_id)}/related`, undefined, controller.signal)
       if (controller.signal.aborted) return
@@ -166,9 +204,11 @@ export default function Discover({ config, request, onWrite }: Props) {
   }, [request, openWord])
 
   useEffect(() => {
+    if (!intro) return
+    try { sessionStorage.setItem('khamlink.intro.v1', '1') } catch { /* Session storage is optional. */ }
     const timer = setTimeout(() => setIntro(false), 1800)
     return () => clearTimeout(timer)
-  }, [])
+  }, [intro])
 
   /** Reset creates a fresh language constellation while keeping previous query shortcuts available. */
   function reset() {
@@ -185,17 +225,18 @@ export default function Discover({ config, request, onWrite }: Props) {
   }
 
   return (
-    <main id="discover-main" className={`discover${intro ? ' discover-entering' : ''}${cardOpen ? ' has-inspector' : ''}`} tabIndex={-1}>
-      <div className="discover-heading"><div><span className="lab-overline">A SPACE BETWEEN WORDS</span><h1>ทุกคำ มีทางไปต่อ<span className="heading-dot">.</span></h1></div><p>ความหมาย <span>—</span> คำ <span>—</span> บริบท</p></div>
-      <section className={`discover-stage${mode === 'compare' ? ' discover-stage-compact' : ''}`} aria-label="สำรวจเครือข่ายคำ" inert={mode === 'compare'} aria-hidden={mode === 'compare' ? true : undefined}>
-        <div className="stage-annotation"><span className="lab-overline">{mode === 'compare' ? '02 / SIDE BY SIDE' : '01 / WORD EXPLORER'}</span><span>{busy ? 'กำลังเชื่อมโยงคำ…' : 'แตะคำ แล้วตามความหมายไป'}</span></div>
-        <SemanticGraph nodes={network.nodes} links={network.links} activeId={activeId} path={path} onSelect={node => { if (node.id === 'seed') void openWord('คำ'); else void openWord(node.id) }} busy={busy} intro={intro} onReset={reset} />
-        {cardOpen && word && mode === 'search' && <aside className="discover-inspector" key={word.word_id} aria-label="ข้อมูลคำที่เลือก"><WordCard word={word} related={related} onExplore={explore} onClose={closeCard} /><div className="inspector-actions"><button onClick={() => { setCompareSeed([word.word, '']); setMode('compare') }}>เปรียบเทียบคำนี้ ⇄</button><button onClick={onWrite}>ไปเขียนต่อ ↗</button></div></aside>}
+    <main id="discover-main" className={`discover${intro ? ' discover-entering' : ''}${cardOpen ? ' has-inspector' : ''}${collapsing ? ' is-collapsing' : ''}`} tabIndex={-1}>
+      <h1 className="sr-only">สำรวจคำและความหมาย</h1>
+      {intro && <div className="intro-slogan">ผู้ช่วยด้านภาษาไทยที่ช่วยให้ทุกความคิดเจอคำที่ใช่</div>}
+      <section className="discover-stage" aria-label="สำรวจเครือข่ายคำ">
+        <SemanticGraph nodes={network.nodes} links={network.links} activeId={activeId} path={path} onSelect={node => { setMode('search'); if (node.id === 'seed') void openWord('คำ'); else void openWord(node.id) }} busy={busy} intro={intro} onReset={reset} generation={generation} />
       </section>
+      <aside className={`discover-inspector ${cardOpen ? 'is-open' : ''}`} aria-label="ข้อมูลคำที่เลือก">
+        {mode === 'search' ? word ? <><button className="mobile-panel-toggle" onClick={() => setCardOpen(!cardOpen)} aria-expanded={cardOpen}>{word.word} · {cardOpen ? 'ย่อความหมาย ↓' : 'ดูความหมาย ↑'}</button><div className="dictionary-content"><WordCard word={word} related={related} onExplore={explore} /><div className="inspector-actions"><button onClick={() => { setCompareSeed([word.word, '']); setMode('compare'); setCardOpen(true) }}>เปรียบเทียบคำนี้ ⇄</button><button onClick={onWrite}>ไปเขียนต่อ ↗</button></div></div></> : <p role="status">กำลังเปิดพจนานุกรม…</p> : <ComparisonWorkspace seed={compareSeed} onExplore={explore} />}
+      </aside>
       <section className={`search-dock${mode === 'compare' ? ' search-dock-compare' : ''}`} aria-label="ค้นหาและเปรียบเทียบคำ">
-        <div className="mode-row"><div className="search-mode" aria-label="รูปแบบการค้นหา"><button className={mode === 'search' ? 'is-active' : ''} aria-pressed={mode === 'search'} onClick={() => setMode('search')}><span>↗</span> SEARCH</button><button className={mode === 'compare' ? 'is-active' : ''} aria-pressed={mode === 'compare'} onClick={() => setMode('compare')}><span>⇄</span> COMPARE</button><i className={mode === 'compare' ? 'mode-slider mode-right' : 'mode-slider'} /></div><span className="mode-caption">{mode === 'search' ? 'หนึ่งคำ เชื่อมได้หลายความหมาย' : 'คล้ายกัน แต่ใช้ไม่เหมือนกัน'}</span></div>
+        <div className="mode-row"><div className="search-mode" role="group" aria-label="รูปแบบการค้นหา" onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 'search' : event.key === 'End' ? 'compare' : mode === 'search' ? 'compare' : 'search'; setMode(next); setCardOpen(true); event.currentTarget.querySelectorAll('button')[next === 'search' ? 0 : 1]?.focus() } }}><button className={mode === 'search' ? 'is-active' : ''} aria-pressed={mode === 'search'} onClick={() => setMode('search')}><span>↗</span> ค้นหาคำ</button><button className={mode === 'compare' ? 'is-active' : ''} aria-pressed={mode === 'compare'} onClick={() => { setMode('compare'); setCardOpen(true) }}><span>⇄</span> เปรียบเทียบ</button><i className={mode === 'compare' ? 'mode-slider mode-right' : 'mode-slider'} /></div></div>
         <div hidden={mode !== 'search'}><DiscoverSearch query={query} onQuery={setQuery} onSearch={value => void search(value)} onChoose={candidate => { setQuery(candidate.word); setResults(undefined); void openWord(candidate.word_id, false) }} busy={busy} limit={limit} /></div>
-        <div hidden={mode !== 'compare'}><ComparisonWorkspace seed={compareSeed} onExplore={explore} /></div>
         {mode === 'search' && <>
           {error && <div className="lab-alert" role="alert"><p>{error}</p><button onClick={() => void search(query)}>ลองอีกครั้ง ↗</button></div>}
           {mapError && <div className="lab-alert" role="status"><p>ยังโหลดคำเชื่อมโยงไม่ได้ ความหมายยังอ่านได้ตามปกติ</p><button onClick={() => word && void openWord(word.word_id)}>โหลดเครือข่ายอีกครั้ง ↗</button></div>}
@@ -206,7 +247,6 @@ export default function Discover({ config, request, onWrite }: Props) {
           {history.length > 0 && <div className="search-history"><span>เส้นทางที่ผ่านมา</span>{history.map(term => <button key={term} onClick={() => void search(term)}>{term}</button>)}</div>}
         </>}
       </section>
-      <section className="discover-below" aria-label="วิธีสำรวจภาษา"><div className="below-heading"><span className="lab-overline">FOLLOW YOUR CURIOSITY</span><h2>เริ่มจากความสงสัย<br /><span>ไปให้ไกลกว่าคำแปล</span></h2></div><div className="explore-ways"><button onClick={() => void search('คนไข้')}><span>01</span><div><h3>คำนี้เชื่อมกับคำไหน</h3><p>ตามเส้นทางของความหมาย ทีละคำ</p></div><b>↗</b></button><button onClick={() => { setCompareSeed(['ประสิทธิภาพ', 'ประสิทธิผล']); setMode('compare'); document.querySelector('.search-dock')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}><span>02</span><div><h3>คล้ายกัน ต่างกันอย่างไร</h3><p>วางคำไว้ข้างกัน แล้วมองให้เห็นความต่าง</p></div><b>⇄</b></button><button onClick={onWrite}><span>03</span><div><h3>หาคำที่ใช่ให้ความคิด</h3><p>พื้นที่เขียน ที่มีภาษาอยู่ข้าง ๆ</p></div><b>↗</b></button></div></section>
       <footer className="discover-footer"><span>KhamLink <i>คำเชื่อมความคิด</i></span><p>ความหมายจากพจนานุกรม · ความเชื่อมโยงจากข้อมูลและ AI</p><span>TH / EN</span></footer>
       <span className="sr-only" role="status" aria-live="polite">{busy ? 'กำลังโหลดข้อมูลคำ' : word ? `กำลังสำรวจ ${word.word}` : ''}</span>
     </main>

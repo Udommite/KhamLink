@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import { api, wordKeyFromHash } from './api'
 import Discover, { type DiscoverRequest } from './Discover'
 import Write from './Write'
@@ -8,6 +9,7 @@ import * as store from './docs'
 import type { Config } from './types'
 import './styles.css'
 import './lab.css'
+import './redesign.css'
 
 /** Decode document links without allowing malformed fragments to crash the app. */
 function documentId(hash: string): string | null {
@@ -43,16 +45,28 @@ function App() {
   useEffect(() => {
     /** Preserve browser back/forward and existing direct links. */
     const navigate = () => {
-      setRoute(location.hash)
-      const term = wordKeyFromHash(location.hash)
-      if (term) setRequest({ term, key: Date.now() })
+      const update = () => {
+        setRoute(location.hash)
+        const term = wordKeyFromHash(location.hash)
+        if (term) setRequest({ term, key: Date.now() })
+      }
+      if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(() => flushSync(update))
+      else update()
     }
     addEventListener('hashchange', navigate)
     return () => removeEventListener('hashchange', navigate)
   }, [])
   useEffect(() => { const controller = new AbortController(); api<Config>('/config', undefined, controller.signal).then(setConfig).catch(() => undefined); return () => controller.abort() }, [])
   useEffect(() => { store.save(docs) }, [docs])
-  useEffect(() => { document.documentElement.dataset.theme = 'light' }, [])
+  useEffect(() => {
+    if (!removed || !writing) return
+    const undoDelete = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' || event.shiftKey || (event.target as HTMLElement).closest('input, textarea, [contenteditable="true"]')) return
+      event.preventDefault(); setDocs(previous => [removed, ...previous]); setRemoved(undefined)
+    }
+    addEventListener('keydown', undoDelete)
+    return () => removeEventListener('keydown', undoDelete)
+  }, [removed, writing])
 
   /** Open the most recent document, or invite a fresh one. */
   function openWrite() { location.hash = docs[0] ? `#/doc/${docs[0].id}` : '#/write' }

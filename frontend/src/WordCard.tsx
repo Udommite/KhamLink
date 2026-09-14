@@ -12,7 +12,7 @@ interface Props {
 }
 
 const metadataLabels: Record<string, string> = {
-  pronunciation: 'คำอ่าน', ipa: 'เสียงอ่าน', register: 'ระดับภาษา', example: 'ตัวอย่างการใช้',
+  pronunciation: 'คำอ่าน', ipa: 'เสียงอ่าน', register: 'ระดับภาษา',
   note: 'ข้อสังเกต', usage: 'การใช้', etymology: 'ที่มาของคำ', context: 'บริบท', collocations: 'คำที่ใช้ร่วมกัน',
 }
 
@@ -44,7 +44,7 @@ function WordSense({ sense }: { sense: Definition }) {
       <div className="word-sense-label"><span>{String(sense.number).padStart(2, '0')}</span>{sense.part_of_speech && <span>{sense.part_of_speech}</span>}</div>
       <p className="word-definition">{readableText(sense.text)}</p>
       {Object.entries(metadataLabels).filter(([key]) => sense.metadata[key]).map(([key, label]) => (
-        <div className={`word-metadata ${key === 'example' ? 'word-example' : ''}`} key={key}>
+        <div className="word-metadata" key={key}>
           <span>{label}</span><p>{readableText(sense.metadata[key]!)}</p>
         </div>
       ))}

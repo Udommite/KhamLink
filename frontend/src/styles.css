@@ -5,11 +5,11 @@
 /* Webfonts are progressive enhancement: this app is demonstrated offline, so every
    family falls back to a Thai face Windows and macOS already have. Leelawadee UI and
    Noto Sans Thai both carry the full tone/vowel repertoire. */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Maitree:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Niramit:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
-  --ui: 'IBM Plex Sans Thai', 'Leelawadee UI', 'Noto Sans Thai', 'Sarabun', system-ui, sans-serif;
-  --doc: 'Maitree', 'Noto Serif Thai', 'Leelawadee UI', Georgia, serif;
+  --ui: 'Niramit', 'Leelawadee UI', 'Noto Sans Thai', 'Sarabun', system-ui, sans-serif;
+  --doc: var(--ui);
   --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
   /* Blue carries the interface (60%), yellow provides emphasis (30%), and green
