@@ -94,6 +94,7 @@ a:hover { text-decoration: underline }
 :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 4px }
 ::selection { background: var(--green-50); color: var(--ink) }
 .muted { color: var(--ink-2) }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0 }
 .tiny { font-size: .78rem; color: var(--ink-3) }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums }
 .skip-link { position: fixed; left: 12px; top: -100px; z-index: 90; background: var(--paper); padding: 12px 16px; border-radius: var(--radius); box-shadow: var(--shadow-lg) }
@@ -141,11 +142,20 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 16px }
 .doc-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 196px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); text-align: left; transition: border-color var(--step), transform var(--step), box-shadow var(--step) }
 .doc-card:hover { border-color: var(--ink-3); transform: translateY(-2px); box-shadow: var(--shadow) }
-.doc-card h3 { font-size: 1.02rem; overflow-wrap: anywhere }
+.doc-card:focus-within { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-50) }
+/* Covers the card but sits under the menu button, so one click opens and the menu still works. */
+.doc-hit { position: absolute; inset: 0; z-index: 1; border-radius: var(--radius-lg) }
+.doc-hit:focus-visible { outline: none }
+.doc-card > *:not(.doc-hit) { position: relative; z-index: 2; pointer-events: none }
+/* Re-assert after the stacking rule above, which sets position on every child and
+   would otherwise drop the menu out of the corner and into the flow. */
+.doc-card .doc-menu { position: absolute; right: 10px; top: 12px; z-index: 3 }
+.doc-card .doc-menu, .doc-card .doc-menu * { pointer-events: auto }
+.doc-card h3 { font-size: 1.02rem; overflow-wrap: anywhere; color: var(--ink) }
 .doc-card .excerpt { font-family: var(--doc); font-size: .86rem; color: var(--ink-2); line-height: 1.8; flex: 1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical }
 .doc-card .meta { font-size: .74rem; color: var(--ink-3) }
 .doc-card .kind { align-self: flex-start; font-size: .7rem; padding: 3px 9px; border-radius: 100px; background: var(--sunken); color: var(--ink-2) }
-.doc-menu { position: absolute; right: 10px; top: 12px }
+.doc-menu { position: absolute; right: 10px; top: 12px; z-index: 3 }
 .menu-pop { position: absolute; right: 0; top: 30px; z-index: 20; min-width: 168px; padding: 6px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg) }
 .menu-pop button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: .85rem }
 .menu-pop button:hover { background: var(--sunken) }
@@ -163,7 +173,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .rail-btn:hover .tip, .rail-btn:focus-visible .tip { opacity: 1 }
 .rail .spacer { flex: 1 }
 
-.workspace { display: flex; flex-direction: column; min-width: 0; background: var(--canvas) }
+.workspace { display: flex; flex-direction: column; min-width: 0; background: var(--paper) }
 .doc-head { display: flex; align-items: center; gap: 12px; padding: 14px 28px; border-bottom: 1px solid var(--line); background: var(--paper) }
 .doc-title { flex: 1; min-width: 0; font-size: 1.02rem; font-weight: 600; border: 1px solid transparent; border-radius: 8px; padding: 5px 9px; background: transparent }
 .doc-title:hover { border-color: var(--line) }
@@ -204,6 +214,18 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .mirror mark[data-cat='delivery'] { border-bottom: 2px solid var(--delivery) }
 .mirror mark[data-active='true'] { background: var(--active-span) }
 .mirror mark[data-cat='selection'] { background: var(--green-50); border-bottom: 2px solid var(--green) }
+
+/* Anchored to the span it judges, inside .sheet so it scrolls with the text. */
+.span-card { position: absolute; z-index: 30; width: min(292px, 88vw); padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow-lg); animation: rise .16s cubic-bezier(.2,.8,.3,1) }
+@keyframes rise { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: none } }
+.span-card .card-kind { display: flex; align-items: center; gap: 7px; font-size: .74rem; font-weight: 600; margin-bottom: 6px }
+.span-card[data-cat='correctness'] .card-kind { color: var(--correctness) }
+.span-card .target { font-family: var(--doc); font-size: 1rem }
+.span-card .target s { color: var(--ink-3) }
+.span-card .target b { color: var(--green) }
+.span-card .why { font-size: .8rem; color: var(--ink-2); margin-top: 5px }
+.saved { display: inline-flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--ink-3) }
+.saved i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); font-style: normal }
 
 .toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 28px; border-top: 1px solid var(--line); background: var(--paper); flex-wrap: wrap }
 .toolbar .spacer { flex: 1 }

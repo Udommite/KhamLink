@@ -93,6 +93,11 @@ function Dashboard({ docs, onOpen, onCreate, onDelete, onDuplicate, onPrivacy, t
             <div className="doc-grid">
               {list.map(doc => (
                 <div className="doc-card" key={doc.id}>
+                  {/* The whole card is the target; the heading link carries the accessible
+                      name so the card is still one tab stop with a sensible label. */}
+                  <a className="doc-hit" href={`#/doc/${doc.id}`} onClick={() => track('doc_opened', { id: doc.id })}>
+                    <span className="sr-only">{doc.title || store.UNTITLED}</span>
+                  </a>
                   <span className="kind">{formalityLabels[doc.formality]}</span>
                   <div className="doc-menu">
                     <button className="btn btn-ghost btn-sm" aria-label={`ตัวเลือกของ ${doc.title}`} aria-expanded={menu === doc.id}
@@ -105,9 +110,9 @@ function Dashboard({ docs, onOpen, onCreate, onDelete, onDuplicate, onPrivacy, t
                       </div>
                     )}
                   </div>
-                  <h3><a href={`#/doc/${doc.id}`} onClick={() => track('doc_opened', { id: doc.id })}>{doc.title || store.UNTITLED}</a></h3>
+                  <h3>{doc.title || store.UNTITLED}</h3>
                   <p className="excerpt">{excerpt(doc) || 'ยังไม่มีข้อความ'}</p>
-                  <p className="meta">แก้ไข{when(doc.updated)} · {countWords(doc.body)} คำ</p>
+                  <p className="meta">แก้ไขเมื่อ {when(doc.updated)} · {countWords(doc.body).toLocaleString('th-TH')} คำ</p>
                 </div>
               ))}
             </div>
@@ -133,6 +138,9 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
   const [tab, setTab] = useState<Tab>('review')
   const [entry, setEntry] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Where the activation came from. Clicking the text shows the card at the words;
+  // clicking the rail card just marks the span, because the card is already open.
+  const [fromText, setFromText] = useState(false)
   const [filter, setFilter] = useState<Set<Category>>(new Set(CATEGORIES.map(c => c.id)))
   const [selection, setSelection] = useState<{ start: number; end: number; text: string; tokenId: string | null } | null>(null)
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
@@ -141,6 +149,8 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
   const [sheetOpen, setSheetOpen] = useState(false)
   const [findSeed, setFindSeed] = useState('')
   const ticket = useRef(0)
+  const active = visibleActive(review, dismissed, activeId)
+  const anchored = fromText ? active : undefined
 
   const analyze = useCallback(async () => {
     if (!doc.body.trim()) { setReview(undefined); setDirty(false); return }
@@ -157,6 +167,14 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
       if (mine === ticket.current) setBusy(false)
     }
   }, [doc.body, doc.formality])
+
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); void analyze() }
+    }
+    addEventListener('keydown', shortcut)
+    return () => removeEventListener('keydown', shortcut)
+  }, [analyze])
 
   // Re-check when the goal changes, because the goal decides which register warnings fire.
   useEffect(() => { if (review) void analyze() /* eslint-disable-next-line */ }, [doc.formality])
@@ -231,7 +249,25 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
             tokens={visible?.tokens || []}
             activeId={activeId}
             selection={selection}
-            onActivate={id => { setActiveId(id); setTab('review'); setEntry(null); setSheetOpen(true) }}
+            onActivate={id => { setActiveId(id); setFromText(true); setTab('review'); setEntry(null) }}
+            popover={anchored && (
+              <>
+                <p className="card-kind"><span className="card-dot" aria-hidden="true" />{anchored.title}</p>
+                <p className="target">
+                  {anchored.replacements.length
+                    ? <><s>{anchored.text}</s> → <b>{anchored.replacements[0].word}</b></>
+                    : anchored.text}
+                </p>
+                <p className="why">{anchored.message}</p>
+                <div className="card-actions">
+                  {anchored.replacements.length > 0 && (
+                    <button className="btn btn-sm btn-primary" onClick={() => accept(anchored, anchored.replacements[0].word)}>ใช้คำนี้</button>
+                  )}
+                  <button className="btn btn-sm btn-ghost" onClick={() => { setDismissed(prev => new Set(prev).add(anchored.id)); setActiveId(null) }}>ไม่ต้องแก้</button>
+                </div>
+              </>
+            )}
+            onDismissPopover={() => { setActiveId(null); setFromText(false) }}
             onSelect={range => {
               setSelection(range)
               if (range && range.text.trim()) { setEntry(range.text.trim()); setSheetOpen(true) }
@@ -252,9 +288,11 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
         <div className="toolbar">
           <span className="count">{countWords(doc.body).toLocaleString('th-TH')} คำ</span>
           <span className="tiny">· {audienceLabels[doc.audience]}</span>
+          <span className="saved"><i aria-hidden="true" />บันทึกในเครื่องนี้แล้ว</span>
           <div className="spacer" />
           <button className="btn btn-sm" onClick={() => setModal('breakdown')}>สรุปข้อความ</button>
-          <button className="btn btn-sm btn-primary" onClick={() => void analyze()} disabled={busy || !doc.body.trim()}>
+          <button className="btn btn-sm btn-primary" onClick={() => void analyze()} disabled={busy || !doc.body.trim()}
+            title="Ctrl + Enter">
             {busy ? 'กำลังตรวจ…' : 'ตรวจข้อความ'}
           </button>
         </div>
@@ -275,7 +313,7 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
           ) : tab === 'review' ? (
             <ReviewPanel
               review={visible} busy={busy} error={error} activeId={activeId} filter={filter} onFilter={setFilter}
-              onActivate={setActiveId} onAccept={accept} onDismiss={id => setDismissed(prev => new Set(prev).add(id))}
+              onActivate={id => { setActiveId(id); setFromText(false) }} onAccept={accept} onDismiss={id => setDismissed(prev => new Set(prev).add(id))}
               onAnalyze={() => void analyze()} dirty={dirty && !!review}
             />
           ) : tab === 'find' ? (
@@ -294,6 +332,12 @@ function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivac
       {source && <SourceModal source={source} config={config} onClose={() => setSource(undefined)} />}
     </div>
   )
+}
+
+/** The active suggestion, only while it is still live and not dismissed. */
+function visibleActive(review: Review | undefined, dismissed: Set<string>, activeId: string | null) {
+  if (!review || !activeId || dismissed.has(activeId)) return undefined
+  return review.suggestions.find(s => s.id === activeId)
 }
 
 /* ---------------- root ---------------- */

@@ -22,6 +22,11 @@ interface Props {
   onActivate: (id: string) => void
   onSelect: (range: { start: number; end: number; text: string; tokenId: string | null } | null) => void
   placeholder?: string
+  /** The card that belongs to the active span, rendered anchored to it. Grammarly puts
+      the decision next to the words being judged; making the writer look right to find
+      out what is wrong on the left is the thing that makes a rail feel bolted on. */
+  popover?: React.ReactNode
+  onDismissPopover?: () => void
 }
 
 interface Piece { start: number; end: number; suggestion?: Suggestion; selected?: boolean }
@@ -57,9 +62,10 @@ export function pieces(length: number, suggestions: Suggestion[], selection: Pro
   return split
 }
 
-export default function Editor({ value, onChange, suggestions, tokens, activeId, selection, onActivate, onSelect, placeholder }: Props) {
+export default function Editor({ value, onChange, suggestions, tokens, activeId, selection, onActivate, onSelect, placeholder, popover, onDismissPopover }: Props) {
   const area = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
+  const [anchor, setAnchor] = React.useState<{ top: number; left: number } | null>(null)
 
   // Thai stays inside the BMP, so code points and UTF-16 units agree — but the backend
   // counts code points, so index through the same unit it does rather than assume.
@@ -75,10 +81,45 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
     node.style.height = `${node.scrollHeight}px`
   }, [value])
 
-  useEffect(() => {
-    if (!activeId || !mirror.current) return
-    mirror.current.querySelector(`[data-id="${CSS.escape(activeId)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const measure = useCallback(() => {
+    const mark = activeId ? mirror.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(activeId)}"]`) : null
+    const sheet = mark?.closest('.sheet')
+    if (!mark || !sheet) { setAnchor(null); return }
+    // Measure against .sheet rather than walk the offsetParent chain: the mirror is
+    // absolutely positioned, so which ancestor offsetTop is relative to is not obvious.
+    const box = mark.getBoundingClientRect(), frame = sheet.getBoundingClientRect()
+    setAnchor({ top: box.bottom - frame.top + 8, left: box.left - frame.left })
   }, [activeId])
+
+  useEffect(() => {
+    if (!activeId) { setAnchor(null); return }
+    mirror.current?.querySelector(`[data-id="${CSS.escape(activeId)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    measure()
+  }, [activeId, value, suggestions, measure])
+
+  // The text reflows whenever the window or the rail changes width, which moves the span
+  // out from under its card. Re-measure instead of leaving the card behind.
+  useEffect(() => {
+    if (!activeId) return
+    const sheet = mirror.current?.closest('.sheet')
+    if (!sheet) return
+    const observer = new ResizeObserver(() => measure())
+    observer.observe(sheet)
+    addEventListener('resize', measure)
+    return () => { observer.disconnect(); removeEventListener('resize', measure) }
+  }, [activeId, measure])
+
+  useEffect(() => {
+    if (!anchor || !onDismissPopover) return
+    const close = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return
+      if (event.type === 'pointerdown' && (event.target as HTMLElement)?.closest?.('.span-card')) return
+      onDismissPopover()
+    }
+    addEventListener('keydown', close)
+    addEventListener('pointerdown', close)
+    return () => { removeEventListener('keydown', close); removeEventListener('pointerdown', close) }
+  }, [anchor, onDismissPopover])
 
   const reportSelection = useCallback(() => {
     const node = area.current
@@ -140,6 +181,16 @@ export default function Editor({ value, onChange, suggestions, tokens, activeId,
         spellCheck={false}
         aria-label="ข้อความของคุณ"
       />
+      {popover && anchor && (
+        <div
+          className="span-card"
+          style={{ top: anchor.top, left: `clamp(0px, ${Math.round(anchor.left)}px, max(0px, 100% - 310px))` }}
+          role="dialog"
+          aria-label="ข้อเสนอแนะสำหรับคำนี้"
+        >
+          {popover}
+        </div>
+      )}
     </div>
   )
 }
