@@ -12,16 +12,20 @@ class ComparisonService:
         self.repository, self.grounding = repository, grounding
 
     def compare(self, ids):
-        if len(ids) != 2 or len(set(ids)) != 2:
-            raise DomainError("INVALID_COMPARISON", "กรุณาเลือกคำที่แตกต่างกันสองคำ", fields=["word_ids"])
+        """Compare distinct words, bounding total input instead of the visible column count."""
+        terms = [validate_text(key, 512, "word_ids") for key in ids]
+        if sum(len(key) for key in terms) > 4096:
+            raise DomainError("INPUT_TOO_LONG", "ข้อมูลคำที่เปรียบเทียบยาวเกิน 4096 ตัวอักษร", fields=["word_ids"])
+        if len(terms) < 2 or len(set(terms)) != len(terms):
+            raise DomainError("INVALID_COMPARISON", "กรุณาเลือกคำที่แตกต่างกันอย่างน้อยสองคำ", fields=["word_ids"])
         records, errors = [], []
-        for key in ids:
+        for key in terms:
             try:
                 records.append(self.repository.lookup(key))
             except DomainError as error:
                 errors.append({"word_id": key, "code": error.code, "message": error.message})
         if len({r["word_id"] for r in records}) != len(records):
-            raise DomainError("DUPLICATE_COMPARISON", "กรุณาเลือกคำที่แตกต่างกันสองคำ", fields=["word_ids"])
+            raise DomainError("DUPLICATE_COMPARISON", "กรุณาเลือกคำที่แตกต่างกันอย่างน้อยสองคำ", fields=["word_ids"])
         return {
             "words": records,
             "errors": errors,

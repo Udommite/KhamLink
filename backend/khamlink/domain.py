@@ -70,7 +70,7 @@ class SearchRequest(StrictModel):
 
 
 class CompareRequest(StrictModel):
-    word_ids: list[str] = Field(min_length=2, max_length=2)
+    word_ids: list[str] = Field(min_length=2)
 
 
 class ContextRequest(StrictModel):

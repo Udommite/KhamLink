@@ -12,64 +12,77 @@
   --doc: 'Maitree', 'Noto Serif Thai', 'Leelawadee UI', Georgia, serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
-  --canvas: #f2f3ef;
+  /* Blue carries the interface (60%), yellow provides emphasis (30%), and green
+     remains reserved for confirmed progress and accepted writing changes (10%). */
+  --canvas: #edf4ff;
   --paper: #ffffff;
-  --sunken: #f7f8f5;
-  --ink: #17251f;
-  --ink-2: #4c5d55;
-  --ink-3: #7d8c84;
-  --line: #e0e4dd;
-  --line-2: #eef0ea;
+  --sunken: #dbeaff;
+  --ink: #102a4c;
+  --ink-2: #46617f;
+  --ink-3: #7189a3;
+  --line: #c9dcf2;
+  --line-2: #e2edf9;
 
-  --green: #0e8a63;
-  --green-700: #0a6b4d;
-  --green-50: #e4f3ec;
-  --amber: #f5c451;
+  --blue: #1558b0;
+  --blue-700: #0c438b;
+  --blue-50: #dceaff;
+  --green: #178a4b;
+  --green-700: #106b39;
+  --green-50: #e2f5e9;
+  --amber: #e7b91a;
+  --amber-700: #8a6500;
+  --amber-50: #fff6d5;
 
   /* Grammarly's category vocabulary: the underline in the document and the card in the
      rail must be the same colour, or the link between them has to be explained. */
   --correctness: #d6453d;
   --clarity: #2f6fed;
-  --engagement: #0e8a63;
+  --engagement: #178a4b;
   --delivery: #7b5ea7;
   --correctness-soft: #fbeae9;
   --clarity-soft: #e9f0fd;
-  --engagement-soft: #e4f3ec;
+  --engagement-soft: #e2f5e9;
   --delivery-soft: #f0ecf7;
-  --active-span: #fdf0c2;
+  --active-span: #fff1b8;
 
   --radius: 10px;
   --radius-lg: 16px;
   --rail-w: 68px;
   --side-w: 384px;
   --measure: 34rem;
-  --shadow: 0 1px 2px #17251f0d, 0 8px 24px #17251f0a;
-  --shadow-lg: 0 24px 64px #17251f24;
+  --shadow: 0 1px 2px #102a4c0d, 0 8px 24px #102a4c0a;
+  --shadow-lg: 0 24px 64px #102a4c24;
   --step: .2s cubic-bezier(.2, .8, .3, 1);
 }
 
 :root[data-theme='dark'] {
-  --canvas: #121316;
-  --paper: #1b1d20;
-  --sunken: #212427;
-  --ink: #e9e7e2;
-  --ink-2: #a9b0ab;
-  --ink-3: #7b837e;
-  --line: #2e3236;
-  --line-2: #26292c;
+  --canvas: #0a1b33;
+  --paper: #102844;
+  --sunken: #173858;
+  --ink: #edf5ff;
+  --ink-2: #b7cbe1;
+  --ink-3: #819bb8;
+  --line: #284a6b;
+  --line-2: #1b3a5a;
 
-  --green: #2fb98a;
-  --green-700: #4ccfa0;
-  --green-50: #16302a;
+  --blue: #78aefb;
+  --blue-700: #a9caff;
+  --blue-50: #183f70;
+  --green: #46c978;
+  --green-700: #71df99;
+  --green-50: #123b29;
+  --amber: #f4c83d;
+  --amber-700: #ffe181;
+  --amber-50: #4d3d0e;
   --correctness: #f0736a;
   --clarity: #7aa4f7;
-  --engagement: #2fb98a;
+  --engagement: #46c978;
   --delivery: #b498e0;
   --correctness-soft: #33211f;
   --clarity-soft: #1c2433;
-  --engagement-soft: #16302a;
+  --engagement-soft: #123b29;
   --delivery-soft: #262135;
-  --active-span: #4a3c14;
+  --active-span: #564616;
   --shadow: 0 1px 2px #0006, 0 8px 24px #0000004d;
   --shadow-lg: 0 24px 64px #00000080;
 }
@@ -89,7 +102,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; line-height: 1.45; letter-spacing:
 p { margin: 0 }
 button, input, textarea, select { font: inherit; color: inherit }
 button { cursor: pointer; background: none; border: 0; padding: 0; color: inherit }
-a { color: var(--green); text-decoration: none }
+a { color: var(--blue); text-decoration: none }
 a:hover { text-decoration: underline }
 :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 4px }
 ::selection { background: var(--green-50); color: var(--ink) }
@@ -104,17 +117,17 @@ a:hover { text-decoration: underline }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 0 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--paper); font-size: .88rem; font-weight: 500; transition: background var(--step), border-color var(--step) }
 .btn:hover { background: var(--sunken) }
 .btn:disabled { opacity: .5; cursor: not-allowed }
-.btn-primary { background: var(--green); border-color: var(--green); color: #fff }
-.btn-primary:hover { background: var(--green-700); border-color: var(--green-700) }
+.btn-primary { background: var(--blue); border-color: var(--blue); color: #fff }
+.btn-primary:hover { background: var(--blue-700); border-color: var(--blue-700) }
 .btn-ghost { border-color: transparent; background: transparent }
 .btn-ghost:hover { background: var(--sunken) }
 .btn-sm { min-height: 30px; padding: 0 10px; font-size: .8rem }
 .field { width: 100%; min-height: 38px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); transition: border-color var(--step) }
-.field:focus { border-color: var(--green); outline: none; box-shadow: 0 0 0 3px var(--green-50) }
+.field:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px var(--blue-50) }
 textarea.field { resize: vertical; line-height: 1.8 }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: 100px; border: 1px solid var(--line); background: var(--paper); font-size: .78rem; white-space: nowrap }
 .chip[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: var(--paper) }
-.spinner { width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--green); border-radius: 50%; animation: spin .7s linear infinite; flex: none }
+.spinner { width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; flex: none }
 @keyframes spin { to { transform: rotate(360deg) } }
 .state { display: flex; flex-direction: column; gap: 8px; padding: 28px 20px; text-align: center; color: var(--ink-2); font-size: .86rem }
 .state strong { color: var(--ink); font-size: .95rem }
@@ -129,7 +142,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .dash-nav a:hover, .dash-nav button.nav-item:hover { background: var(--sunken); text-decoration: none }
 .dash-nav [aria-current='page'] { background: var(--sunken); color: var(--ink) }
 .dash-nav .spacer { flex: 1 }
-.brand-mark { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--green); color: #fff; font-weight: 700; font-size: 15px; flex: none }
+.brand-mark { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--blue); color: #fff; font-weight: 700; font-size: 15px; flex: none }
 .brand-name { font-weight: 700; letter-spacing: -.02em }
 .dash-main { padding: 34px 40px 60px; max-width: 1180px }
 .dash-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 26px }
@@ -142,7 +155,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 16px }
 .doc-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 196px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--paper); text-align: left; transition: border-color var(--step), transform var(--step), box-shadow var(--step) }
 .doc-card:hover { border-color: var(--ink-3); transform: translateY(-2px); box-shadow: var(--shadow) }
-.doc-card:focus-within { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-50) }
+.doc-card:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-50) }
 /* Covers the card but sits under the menu button, so one click opens and the menu still works. */
 .doc-hit { position: absolute; inset: 0; z-index: 1; border-radius: var(--radius-lg) }
 .doc-hit:focus-visible { outline: none }
@@ -168,7 +181,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .rail { border-right: 1px solid var(--line); background: var(--paper); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0 }
 .rail-btn { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; color: var(--ink-3); position: relative; transition: background var(--step), color var(--step) }
 .rail-btn:hover { background: var(--sunken); color: var(--ink) }
-.rail-btn[aria-current='page'], .rail-btn[aria-pressed='true'] { background: var(--green-50); color: var(--green) }
+.rail-btn[aria-current='page'], .rail-btn[aria-pressed='true'] { background: var(--amber-50); color: var(--amber-700) }
 .rail-btn .tip { position: absolute; left: 54px; top: 50%; transform: translateY(-50%); padding: 5px 10px; border-radius: 7px; background: var(--ink); color: var(--canvas); font-size: .74rem; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--step); z-index: 40 }
 .rail-btn:hover .tip, .rail-btn:focus-visible .tip { opacity: 1 }
 .rail .spacer { flex: 1 }
@@ -177,7 +190,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .doc-head { display: flex; align-items: center; gap: 12px; padding: 14px 28px; border-bottom: 1px solid var(--line); background: var(--paper) }
 .doc-title { flex: 1; min-width: 0; font-size: 1.02rem; font-weight: 600; border: 1px solid transparent; border-radius: 8px; padding: 5px 9px; background: transparent }
 .doc-title:hover { border-color: var(--line) }
-.doc-title:focus { border-color: var(--green); outline: none; background: var(--paper) }
+.doc-title:focus { border-color: var(--blue); outline: none; background: var(--paper) }
 .score-chip { display: inline-flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--radius) }
 .score-chip b { font-family: var(--mono); font-size: 1rem; font-weight: 600 }
 .score-chip span { font-size: .8rem; color: var(--ink-2) }
@@ -205,7 +218,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
   tab-size: 4;
 }
 .sheet .mirror { position: absolute; inset: 0 0 auto 0; color: transparent; pointer-events: none; user-select: none; z-index: 0 }
-.sheet textarea { position: relative; z-index: 1; display: block; background: transparent; color: var(--ink); resize: none; overflow: hidden; outline: none; caret-color: var(--green) }
+.sheet textarea { position: relative; z-index: 1; display: block; background: transparent; color: var(--ink); resize: none; overflow: hidden; outline: none; caret-color: var(--blue) }
 .sheet textarea::placeholder { color: var(--ink-3) }
 .mirror mark { color: transparent; background: transparent; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone }
 .mirror mark[data-cat='correctness'] { border-bottom: 2px solid var(--correctness) }
@@ -235,7 +248,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .side { border-left: 1px solid var(--line); background: var(--paper); display: flex; flex-direction: column; min-width: 0 }
 .side-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line) }
 .side-tab { padding: 14px 10px 12px; font-size: .8rem; font-weight: 500; color: var(--ink-2); border-bottom: 2px solid transparent; line-height: 1.4 }
-.side-tab[aria-selected='true'] { color: var(--ink); border-bottom-color: var(--green) }
+.side-tab[aria-selected='true'] { color: var(--blue); border-bottom-color: var(--blue) }
 .side-tab:hover { background: var(--sunken) }
 .side-body { flex: 1; overflow-y: auto; padding: 18px 18px 40px }
 .side-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 14px }
@@ -254,7 +267,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .cards { display: flex; flex-direction: column; gap: 10px }
 .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); padding: 13px 14px; text-align: left; transition: border-color var(--step), box-shadow var(--step) }
 .card:hover { border-color: var(--ink-3) }
-.card[data-active='true'] { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-50) }
+.card[data-active='true'] { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-50) }
 .card-kind { display: flex; align-items: center; gap: 7px; font-size: .74rem; font-weight: 600; margin-bottom: 6px }
 .card-dot { width: 8px; height: 8px; border-radius: 50%; flex: none }
 .card[data-cat='correctness'] .card-kind { color: var(--correctness) } .card[data-cat='correctness'] .card-dot { background: var(--correctness) }
@@ -289,7 +302,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .prov-ai { background: var(--delivery-soft); color: var(--delivery) }
 .neighbours { display: flex; flex-direction: column; gap: 6px }
 .neighbour { display: flex; align-items: baseline; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius); text-align: left; width: 100% }
-.neighbour:hover { border-color: var(--green); background: var(--green-50) }
+.neighbour:hover { border-color: var(--blue); background: var(--blue-50) }
 .neighbour b { font-family: var(--doc); font-size: .97rem; flex: none }
 .neighbour span { font-size: .78rem; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 
@@ -297,7 +310,7 @@ textarea.field { resize: vertical; line-height: 1.8 }
 .panel-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px }
 .recents { display: flex; flex-wrap: wrap; gap: 6px }
 .result { display: block; width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 8px }
-.result:hover { border-color: var(--green) }
+.result:hover { border-color: var(--blue) }
 .result-top { display: flex; align-items: baseline; gap: 8px }
 .result-top b { font-family: var(--doc); font-size: 1.02rem }
 .result-top .match { font-size: .68rem; padding: 2px 7px; border-radius: 100px; background: var(--sunken); color: var(--ink-2); margin-left: auto }
