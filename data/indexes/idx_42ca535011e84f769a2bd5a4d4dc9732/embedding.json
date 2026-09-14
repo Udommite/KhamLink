@@ -1,0 +1,1 @@
+{"identity": "BAAI/bge-m3+rerank:BAAI/bge-reranker-v2-m3+freq:pythainlp-tnc-ttc", "model": "BAAI/bge-m3", "rerank_model": "BAAI/bge-reranker-v2-m3", "dimensions": 1024, "source_checksum": "7ee0e1f43a2ff16cf81a1bb7533ce8d2b99cb08ca64cd6b051e334cc7e6e6a5d"}

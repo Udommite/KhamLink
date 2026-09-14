@@ -1,0 +1,35 @@
+{
+  "index_id": "idx_42ca535011e84f769a2bd5a4d4dc9732",
+  "dataset_id": "ds_c55626f4287ca392cc41f22c",
+  "corpus": "rid",
+  "corpus_version": "1.0",
+  "source_id": "orst-rid-normalised",
+  "source_version": "1.0",
+  "source_checksum": "4175e958ab212e044d367560bb38134b4a07b59ddcced7900c003e3597b34a7a",
+  "normalization_version": "thai-display-preserving-trim-v1",
+  "embedding_identity": "BAAI/bge-m3+rerank:BAAI/bge-reranker-v2-m3+freq:pythainlp-tnc-ttc",
+  "config": {
+    "method": "khamlink-bge-m3-rerank-frequency-v1",
+    "normalization": "thai-display-preserving-trim-v1",
+    "frequency_source": "pythainlp-tnc-ttc",
+    "embedding": "bge-m3",
+    "bge_model": "BAAI/bge-m3",
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "rerank_enabled": true,
+    "rerank_candidates": 50,
+    "rerank_floor": 0.0,
+    "frequency_weight": 0.6,
+    "semantic_threshold": 0.18
+  },
+  "configuration_hash": "972715fdcdd532c0657b5643e6fc0a1c02a4edebbd1ed7d19e56544d8253526d",
+  "built_at": "2026-09-14T12:00:23.529554+00:00",
+  "method": "khamlink-bge-m3-rerank-frequency-v1",
+  "provenance": "AI_GENERATED_METADATA",
+  "passages": 65569,
+  "skipped_without_vector": 0,
+  "files": {
+    "embedding.json": "604306adf9096b186f1606c9fd51f0a3e0cc61a52f81b37ecf044f48568a4726",
+    "rows.json": "59d7320aff28e94958521c2618e92040f4e42c1a8c6406a05a88b7c805aaef97",
+    "vectors.npy": "25cdab05ff545bb40830cb491068cd453f0a5444727a55b273c2192006ab034e"
+  }
+}
