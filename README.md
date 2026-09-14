@@ -1,6 +1,10 @@
 # KhamLink
 
-Thai word discovery, source-linked Word Cards, comparisons, Context Lens, and an accessible one-hop Word Map. Anonymous core journeys run without an external model or API key. The selected source is **Thai Wiktionary through PyThaiNLP**, not an official Office of the Royal Society dictionary.
+A Thai writing assistant. You write in a document; the right-hand rail tells you which words are not in the dictionary, which have a commoner synonym, which you have repeated, and which clash with the formality you asked for. Select any word to open its Royal Society entry. Everything runs anonymously, with no account and no external API key.
+
+The source is the **Office of the Royal Society dictionary corpus** — พจนานุกรมฉบับราชบัณฑิตยสภา ฉบับ ๒๕๔๒ / ๒๕๕๔ / ๒๕๖๙, plus the Society's coined-term (ศัพท์บัญญัติ: แพทยศาสตร์, จิตวิทยา, ปรัชญา), transliteration and regional-dialect lists — normalised to one row per sense. Retrieval is **BGE-M3 dense vectors → bge-reranker-v2-m3 cross-encoder → a Thai National Corpus frequency prior**, with optional LLM query expansion.
+
+> **Licensing.** This corpus is copyright the Office of the Royal Society. It is **not** redistributable and is deliberately not committed to this repository or downloaded by the setup script: the operator supplies it. Earlier versions of this README described a CC BY-SA Thai Wiktionary corpus and claimed the data was *not* an official Royal Society dictionary. With this corpus that claim would be false, so the manifest now declares `official_royal_society: true` and the interface says so. Decide the redistribution question before deploying anywhere public.
 
 ## Start on Windows
 
@@ -22,19 +26,41 @@ Prerequisites: Python 3.12, Node.js 24, npm, and internet access on first setup.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -Setup
 ```
 
-Open **http://127.0.0.1:8000**. The script installs locked dependencies, builds React, downloads and SHA-256-verifies the 4.8 MB corpus, migrates the database, stages/validates source records, builds a fresh graph index if needed, atomically publishes it, and starts the server. Subsequent starts use `powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1`. `-PrepareOnly` verifies setup without starting a server; `-Port 8001` selects another local port. No administrator credential is exposed by the demo web server.
+Open **http://127.0.0.1:8000**. The script installs locked dependencies and the retrieval models, builds React, SHA-256-verifies the corpus you supplied, migrates the database, stages/validates source records, gathers the shipped vectors into a fresh index, atomically publishes it, and starts the server.
+
+**Before the first run, place the corpus.** Copy `senses.parquet`, `relations.parquet` and `embeddings.parquet` into `data/corpus/`, or point `KHAMLINK_CORPUS_DIR` at the folder holding them:
+
+```powershell
+$env:KHAMLINK_CORPUS_DIR = 'C:\path	o\out'
+```
+
+Setup fails early with a clear message if any of the three is missing. First run also downloads BGE-M3 and the reranker (~2.2 GB each) from Hugging Face; they are cached afterwards. A CUDA GPU is optional — install a CUDA torch build before `start.ps1 -Setup` for it — and queries run about `0.5 s` with one, several seconds on CPU. Subsequent starts use `powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1`. `-PrepareOnly` verifies setup without starting a server; `-Port 8001` selects another local port. No administrator credential is exposed by the demo web server.
 
 The first index build needs more time and memory than subsequent starts. Cache, database, model/index files and local test artifacts live under ignored `data/` and `artifacts/`; they are never source-controlled. Do not delete the data directory to restart the app.
 
 ## Demonstrate real records
 
-1. Search `อนุรักษ์`, or describe `คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย`.
-2. Open a Word Card, inspect its source/version, request an explanation, inspect the cited evidence, and rate/report the result.
-3. Compare `อนุรักษ์` with `สงวน`.
-4. In Context Lens submit `เราช่วยกันอนุรักษ์ภาษาไทย`, then select `อนุรักษ์`. Submit `ขัน` to inspect multiple senses and uncertainty.
-5. Open the Word Map. Sparse words explicitly show no relationship data. Generated retrieval triples never populate this map.
+1. **Write.** Open a new document and paste `อาหารร้านนี้แจ๋วมาก แต่เดือนหน้าร้านจะเจ๊งแล้ว น่าเสียดาย ฟลุ๊คคค`, then press **ตรวจข้อความ**. `ฟลุ๊ค` is underlined red — it is in no entry of the dictionary. Ordinary compounds like `อาหารร้าน` are not flagged, because the review checks whether a token is *made of* dictionary words before calling it an error.
+2. **Change the goal.** The header chip opens the writing goal. Switch to **ทางการ** and the review re-runs: `แจ๋ว` and `เจ๊ง` now carry a purple ระดับภาษา underline, because RID itself marks those senses `(ปาก)`. Switch to **ไม่เป็นทางการ** and they go away. The score moves with them.
+3. **Select a word.** Select `อนุรักษ์` in the text. The rail opens its entry: senses numbered ๑ ๒ ๓ in Thai numerals with the RID part-of-speech tab, pronunciation, edition, and a source-verification control. Semantic neighbours appear in their own group labelled `AI ประมวลผล`; they are never mixed into the dictionary's own cross-references.
+4. **Find a word you cannot recall.** In **หาคำ**, describe the meaning: `คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย`. `อนุรักษ์` comes back first. Insert it at the cursor or open the full entry.
+5. **Compare.** In **เทียบคำ**, put `อนุรักษ์` against `สงวน` and read the senses side by side, then request a grounded explanation of the difference.
+6. **Breakdown.** **สรุปข้อความ** reports characters, Thai-tokenised words, sentences, reading and speaking time, dictionary coverage, register mix and edition mix. There is deliberately no English readability score — that formula does not apply to Thai.
 
-`thai_dict@1.0` contains 19,480 words and 33,515 senses after normalization. `ประสิทธิภาพ`, `ประสิทธิผล`, and `ความสุข` from the SRS examples are absent from this artifact. Lookup reports their absence; synthetic, clearly named test fixtures cover the associated mechanics without shipping invented source definitions.
+Documents are stored in your browser only. They are never uploaded, and there is no account to attach them to.
+
+## How the review decides
+
+| Category | Fires when | Source of truth |
+|---|---|---|
+| ความถูกต้อง (red) | a PyThaiNLP token is in no entry, and is not made of entries | the alias table |
+| ความชัดเจน (blue) | a near-synonym is ≥5× commoner and shares a part of speech | Thai National Corpus counts |
+| ความน่าอ่าน (green) | an unambiguous content word is used 3+ times | BGE-M3 neighbours |
+| ระดับภาษา (purple) | most senses carry a register mark that clashes with your goal | RID's own `(ปาก)`, `(โบ)`, `ถิ่น-` marks |
+
+Two guards keep the rail trustworthy rather than noisy. A word is only flagged for register when **most** of its senses carry the mark — `ช่วย` has one archaic sense among many and is not flagged. And a word commoner than log₁₀ 3.0 in the Thai National Corpus is treated as ordinary vocabulary whatever one sense says, which is what stops `เพื่อน`, `บ้าน` and `ว่า` from being flagged as colloquial.
+
+Review runs no model inference: neighbours come from the stored index vectors and lookups from the alias table, so it answers in milliseconds on a server that has never loaded BGE-M3.
 
 ## Manual setup and tests
 
@@ -58,7 +84,10 @@ npx.cmd playwright install chromium
 npm.cmd run test:e2e
 Set-Location ..
 .venv\Scripts\python.exe scripts/benchmark.py --load
+.venv\Scripts\python.exe scripts/benchmark_rid.py            # retrieval quality, needs the corpus
 ```
+
+`benchmark_rid.py` runs the 18 auto-graded cases the retrieval pipeline was tuned on, through the HTTP API rather than against the retrieval module directly. Current score: **15/18, P0 14/16, median 0.53 s/query** — identical to the standalone pipeline's score, so nothing is lost in integration. The three failures are corpus and method limits, not integration bugs: `SEM-003` and `SEM-007` are description queries the cross-encoder gets wrong, and `REL-001` asks for `ความสุข`, which RID does not file. `--expansion` adds LLM query rewriting.
 
 The browser tests start a separate local server on port 8765. Default tests use deterministic providers and isolated synthetic data; browser/benchmark runs use the real acquired corpus. External calls in provider tests require `KHAMLINK_LIVE_TESTS=1` and explicit endpoint/model credentials. To test source-only operation, set `$env:KHAMLINK_PROVIDER='disabled'` before starting the server.
 

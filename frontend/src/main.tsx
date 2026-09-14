@@ -1,108 +1,365 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { api, ApiError, track, wordHref, wordKeyFromHash } from './api'
-import type { Candidate, Config, ContextResult, Edge, Evidence, Explanation, Metadata, Related, SearchResults, Source, Span, Word } from './types'
+import { api, track } from './api'
+import Editor from './Editor'
+import { BreakdownModal, GoalsModal, PrivacyModal, SourceModal } from './Modals'
+import { CATEGORIES, ComparePanel, EntryPanel, FindPanel, ReviewPanel } from './Rail'
+import * as store from './docs'
+import { audienceLabels, countWords, excerpt, formalityLabels, isToday, when, type Doc } from './docs'
+import type { Category, Config, Review, Source, Suggestion } from './types'
 import './styles.css'
 
-const sessionId = crypto.randomUUID()
-const labels: Record<string, string> = { SOURCE_DATA: 'ข้อมูลจากแหล่งอ้างอิง', CURATED_METADATA: 'ข้อมูลที่ผู้ดูแลเรียบเรียง', AI_GENERATED_METADATA: 'คำอธิบายจาก AI', USER_GENERATED_DATA: 'ความคิดเห็นจากผู้ใช้' }
-const relations: Record<string, string> = { similar: 'ความหมายใกล้เคียง', opposite: 'ตรงข้าม', broader: 'ความหมายกว้างกว่า', narrower: 'ความหมายเฉพาะกว่า', 'confused-with': 'มักสับสน', confused_with: 'มักสับสน', related: 'เกี่ยวข้อง' }
-const metadataLabels: Record<string, string> = { pronunciation: 'คำอ่าน', register: 'ระดับภาษา', origin: 'ที่มา', usage_note: 'ข้อสังเกตการใช้', example: 'ตัวอย่างจากแหล่งข้อมูล', context: 'บริบทการใช้', misuse: 'ข้อควรระวัง', simplified_explanation: 'คำอธิบายเพิ่มเติม' }
-
-function ErrorMessage({ error }: { error: unknown }) {
-  if (!error) return null
-  return <div className="notice error" role="alert"><p>{error instanceof Error ? error.message : 'เกิดข้อผิดพลาด กรุณาลองอีกครั้ง'}</p>{error instanceof ApiError && error.correlationId && <small>รหัสติดตาม: {error.correlationId}</small>}</div>
+/* ---------------- icons (inline: four strokes beat a dependency) ---------------- */
+const Icon = ({ d, filled = false }: { d: string; filled?: boolean }) => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
+    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+)
+const PATHS = {
+  docs: 'M6 3h8l5 5v13H6zM14 3v5h5',
+  write: 'M4 20h16M6 16l10-10 3 3-10 10H6z',
+  find: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  compare: 'M12 3v18M5 8l-3 4 3 4M19 8l3 4-3 4',
+  chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  sun: 'M12 4v2M12 18v2M4 12H2M22 12h-2M6 6L5 5M18 18l1 1M6 18l-1 1M18 6l1-1M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z',
+  moon: 'M20 14a8 8 0 1 1-10-10 7 7 0 0 0 10 10z',
+  shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',
+  back: 'M15 19l-7-7 7-7',
 }
-function Busy({ children = 'กำลังค้นหาข้อมูล…' }: { children?: React.ReactNode }) { return <p role="status" className="busy"><span className="spinner" aria-hidden="true" />{children}</p> }
-function Provenance({ value }: { value: string }) { return labels[value] ? <span className={`provenance ${value === 'AI_GENERATED_METADATA' ? 'ai-label' : ''}`}>{labels[value]}</span> : null }
 
-function SourceButton({ source, onSource }: { source: Source; onSource: (s: Source) => void }) {
-  return <button className="source-link" onClick={() => { onSource(source); track('source_opened', { source_id: source.source_id, source_version: source.version }) }}>↗ {source.name} · รุ่น {source.version}</button>
+/* ---------------- theme ---------------- */
+function useTheme() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('khamlink.theme')
+      if (saved === 'light' || saved === 'dark') return saved
+    } catch { /* private window */ }
+    return matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { localStorage.setItem('khamlink.theme', theme) } catch { /* ignore */ }
+  }, [theme])
+  return [theme, () => setTheme(t => (t === 'light' ? 'dark' : 'light'))] as const
 }
 
-function Feedback({ token }: { token?: string }) {
-  const [rating, setRating] = useState(''), [reason, setReason] = useState('incorrect'), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState<unknown>(null)
-  if (!token) return null
-  async function submit(value: string, report = false) {
-    setBusy(true); setError(null); setMessage('')
-    try { await api('/feedback', { target_token: token, interaction_id: sessionId, ...(report ? { reason: value } : { rating: value }) }); if (!report) setRating(value); setMessage(report ? 'รับแจ้งปัญหาแล้ว ขอบคุณที่ช่วยตรวจสอบข้อมูล' : 'บันทึกความคิดเห็นแล้ว ขอบคุณครับ') }
-    catch (e) { setError(e) } finally { setBusy(false) }
+/* ---------------- dashboard ---------------- */
+function Dashboard({ docs, onOpen, onCreate, onDelete, onDuplicate, onPrivacy, theme, toggleTheme, config }: {
+  docs: Doc[]; onOpen: (id: string) => void; onCreate: () => void
+  onDelete: (id: string) => void; onDuplicate: (id: string) => void
+  onPrivacy: () => void; theme: string; toggleTheme: () => void; config?: Config
+}) {
+  const [query, setQuery] = useState('')
+  const [menu, setMenu] = useState<string | null>(null)
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? docs.filter(d => (d.title + ' ' + d.body).toLowerCase().includes(needle)) : docs
+  const groups: [string, Doc[]][] = [
+    ['วันนี้', shown.filter(d => isToday(d.updated))],
+    ['ก่อนหน้านี้', shown.filter(d => !isToday(d.updated))],
+  ]
+
+  return (
+    <div className="dash">
+      <nav className="dash-nav" aria-label="เมนูหลัก">
+        <div className="brand"><span className="brand-mark" aria-hidden="true">คำ</span><span className="brand-name">KhamLink</span></div>
+        <a href="#/" aria-current="page"><Icon d={PATHS.docs} />เอกสาร</a>
+        <button className="nav-item" onClick={onCreate}><Icon d={PATHS.write} />เขียนงานใหม่</button>
+        <div className="spacer" />
+        <button className="nav-item" onClick={toggleTheme}><Icon d={theme === 'dark' ? PATHS.sun : PATHS.moon} />{theme === 'dark' ? 'ธีมสว่าง' : 'ธีมมืด'}</button>
+        <button className="nav-item" onClick={onPrivacy}><Icon d={PATHS.shield} />ข้อมูลและความเป็นส่วนตัว</button>
+      </nav>
+
+      <main className="dash-main" id="main" tabIndex={-1}>
+        <div className="dash-head">
+          <h1>เอกสาร</h1>
+          <button className="btn btn-primary" onClick={onCreate}>+ เขียนงานใหม่</button>
+          <div className="search">
+            <Icon d={PATHS.find} />
+            <input className="field" value={query} onChange={event => setQuery(event.target.value)} placeholder="ค้นในเอกสารของคุณ" aria-label="ค้นในเอกสารของคุณ" />
+          </div>
+        </div>
+
+        {!docs.length && (
+          <div className="state" style={{ padding: '70px 20px' }}>
+            <strong>เริ่มเขียนงานแรกของคุณ</strong>
+            พิมพ์ภาษาไทยลงไป แล้วระบบจะช่วยหาคำที่ตรงความหมายกว่า จากพจนานุกรมฉบับราชบัณฑิตยสภา
+            <p><button className="btn btn-primary" onClick={onCreate}>เขียนงานใหม่</button></p>
+          </div>
+        )}
+        {docs.length > 0 && !shown.length && <div className="state">ไม่พบเอกสารที่ตรงกับ “{query}”</div>}
+
+        {groups.filter(([, list]) => list.length).map(([label, list]) => (
+          <section className="doc-group" key={label}>
+            <h2>{label}</h2>
+            <div className="doc-grid">
+              {list.map(doc => (
+                <div className="doc-card" key={doc.id}>
+                  <span className="kind">{formalityLabels[doc.formality]}</span>
+                  <div className="doc-menu">
+                    <button className="btn btn-ghost btn-sm" aria-label={`ตัวเลือกของ ${doc.title}`} aria-expanded={menu === doc.id}
+                      onClick={() => setMenu(menu === doc.id ? null : doc.id)}>···</button>
+                    {menu === doc.id && (
+                      <div className="menu-pop" role="menu">
+                        <button role="menuitem" onClick={() => { setMenu(null); onOpen(doc.id) }}>เปิด</button>
+                        <button role="menuitem" onClick={() => { setMenu(null); onDuplicate(doc.id) }}>ทำสำเนา</button>
+                        <button role="menuitem" className="danger" onClick={() => { setMenu(null); onDelete(doc.id) }}>ลบ</button>
+                      </div>
+                    )}
+                  </div>
+                  <h3><a href={`#/doc/${doc.id}`} onClick={() => track('doc_opened', { id: doc.id })}>{doc.title || store.UNTITLED}</a></h3>
+                  <p className="excerpt">{excerpt(doc) || 'ยังไม่มีข้อความ'}</p>
+                  <p className="meta">แก้ไข{when(doc.updated)} · {countWords(doc.body)} คำ</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+        {config?.source_label && <p className="tiny" style={{ marginTop: 40 }}>{config.source_label}</p>}
+      </main>
+    </div>
+  )
+}
+
+/* ---------------- workspace ---------------- */
+type Tab = 'review' | 'find' | 'compare'
+
+function Workspace({ doc, onChange, onBack, theme, toggleTheme, config, onPrivacy }: {
+  doc: Doc; onChange: (patch: Partial<Doc>) => void; onBack: () => void
+  theme: string; toggleTheme: () => void; config?: Config; onPrivacy: () => void
+}) {
+  const [review, setReview] = useState<Review>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>()
+  const [dirty, setDirty] = useState(false)
+  const [tab, setTab] = useState<Tab>('review')
+  const [entry, setEntry] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [filter, setFilter] = useState<Set<Category>>(new Set(CATEGORIES.map(c => c.id)))
+  const [selection, setSelection] = useState<{ start: number; end: number; text: string; tokenId: string | null } | null>(null)
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+  const [modal, setModal] = useState<'goals' | 'breakdown' | null>(null)
+  const [source, setSource] = useState<Source>()
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [findSeed, setFindSeed] = useState('')
+  const ticket = useRef(0)
+
+  const analyze = useCallback(async () => {
+    if (!doc.body.trim()) { setReview(undefined); setDirty(false); return }
+    const mine = ++ticket.current
+    setBusy(true); setError(null)
+    try {
+      const result = await api<Review>('/review', { text: doc.body, formality: doc.formality })
+      if (mine !== ticket.current) return
+      setReview(result); setDismissed(new Set()); setDirty(false)
+      track('review_run', { count: result.suggestions.length })
+    } catch (problem) {
+      if (mine === ticket.current) setError(problem)
+    } finally {
+      if (mine === ticket.current) setBusy(false)
+    }
+  }, [doc.body, doc.formality])
+
+  // Re-check when the goal changes, because the goal decides which register warnings fire.
+  useEffect(() => { if (review) void analyze() /* eslint-disable-next-line */ }, [doc.formality])
+
+  const visible = useMemo(
+    () => review ? { ...review, suggestions: review.suggestions.filter(s => !dismissed.has(s.id)) } : undefined,
+    [review, dismissed],
+  )
+
+  function accept(suggestion: Suggestion, word: string) {
+    const characters = Array.from(doc.body)
+    const next = [...characters.slice(0, suggestion.start), ...Array.from(word), ...characters.slice(suggestion.end)].join('')
+    const shift = Array.from(word).length - (suggestion.end - suggestion.start)
+    onChange({ body: next })
+    // Keep the remaining cards pointing at the right characters instead of re-analysing
+    // the whole document for one accepted word.
+    setReview(current => current && {
+      ...current,
+      score: Math.min(100, current.score + 3),
+      suggestions: current.suggestions
+        .filter(s => s.id !== suggestion.id)
+        .map(s => (s.start >= suggestion.end ? { ...s, start: s.start + shift, end: s.end + shift } : s)),
+      tokens: current.tokens
+        .filter(t => !(t.start >= suggestion.start && t.end <= suggestion.end))
+        .map(t => (t.start >= suggestion.end ? { ...t, start: t.start + shift, end: t.end + shift } : t)),
+    })
+    setActiveId(null)
+    setDirty(true)
   }
-  return <div className="feedback"><div className="feedback-row"><span>ข้อมูลนี้มีประโยชน์ไหม?</span><button disabled={busy} aria-pressed={rating === 'useful'} onClick={() => void submit('useful')}>มีประโยชน์</button><button disabled={busy} aria-pressed={rating === 'not_useful'} onClick={() => void submit('not_useful')}>ยังไม่ตรงใจ</button></div><details><summary>แจ้งปัญหาข้อมูล</summary><div className="report"><label>เหตุผล<select value={reason} onChange={e => setReason(e.target.value)}><option value="incorrect">ข้อมูลไม่ถูกต้อง</option><option value="confusing">อ่านแล้วสับสน</option><option value="source">ปัญหาแหล่งอ้างอิง</option><option value="other">อื่น ๆ</option></select></label><p className="muted">เก็บเฉพาะเหตุผลที่เลือก รุ่นนี้ไม่เก็บรายละเอียดข้อความส่วนตัว</p><button disabled={busy} onClick={() => void submit(reason, true)}>ส่งรายงาน</button></div></details><p role="status" className="muted">{busy ? 'กำลังบันทึก…' : message}</p><ErrorMessage error={error} /></div>
-}
 
-function MetadataBlock({ items }: { items: Metadata[] }) {
-  return <>{items.filter(m => m.provenance === 'CURATED_METADATA' || m.provenance === 'AI_GENERATED_METADATA').map(m => <div key={m.id} className="metadata-note"><Provenance value={m.provenance} /><p><strong>{metadataLabels[m.kind] || 'ข้อมูลเพิ่มเติม'}:</strong> {m.text}</p></div>)}</>
-}
-
-function Definitions({ word, onSource }: { word: Word; onSource: (s: Source) => void }) {
-  return <div className="source-content" data-testid="source-content"><div className="section-heading"><Provenance value="SOURCE_DATA" /><span className="muted">{word.definitions.length} ความหมาย</span></div><ol className="definitions">{word.definitions.map(d => <li key={d.definition_id} value={d.number}><div className="sense-title"><span className="sense-number">{String(d.number).padStart(2, '0')}</span>{d.part_of_speech && <span className="pos">{d.part_of_speech}</span>}</div><p className="definition-text">{d.text}</p>{Object.entries(d.metadata || {}).filter(([k, v]) => v && metadataLabels[k]).map(([k, v]) => <p key={k} className="metadata-note"><strong>{metadataLabels[k]}:</strong> {v}<br /><Provenance value="SOURCE_DATA" /></p>)}<SourceButton source={d.source} onSource={onSource} /></li>)}</ol><MetadataBlock items={word.curated_metadata} /><MetadataBlock items={word.ai_generated_metadata} /></div>
-}
-
-function ExplanationPanel({ data, busy, error, onRequest, onEvidence }: { data?: Explanation; busy: boolean; error: unknown; onRequest: () => void; onEvidence: (id: string) => void }) {
-  return <section className="ai-panel" aria-labelledby="explanation-title"><div className="section-heading"><div><span className="eyebrow">อ่านให้เข้าใจมากขึ้น</span><h3 id="explanation-title">คำอธิบายเพิ่มเติม</h3></div><span className="spark" aria-hidden="true">✧</span></div><p className="muted">คำอธิบายจาก AI แสดงแยกจากความหมายต้นฉบับ</p>{busy ? <Busy>กำลังอ่านหลักฐานและเรียบเรียง…</Busy> : data ? <>{data.state === 'grounded' ? <><Provenance value="AI_GENERATED_METADATA" /><div className="claims">{data.claims.map((c, i) => <div key={`${c.evidence_ids[0]}-${i}`}><h4>{c.word} <small>ความหมายที่ {c.number}</small></h4><p>{c.text}</p><div>{c.evidence_ids.map(id => <button className="text-button" key={id} onClick={() => onEvidence(id)}>ดูหลักฐาน · รุ่น {c.source_version} ↗</button>)}</div></div>)}</div><p className="muted">{data.mode === 'extractive' ? 'โหมดในเครื่อง: เลือกข้อความสำคัญจากต้นฉบับ ไม่ได้เพิ่มนิยามใหม่' : data.limitation}</p></> : data.state === 'curated' ? <MetadataBlock items={data.curated_metadata || []} /> : <p role="status" className="notice">{data.text}</p>}<Feedback token={data.feedback_target} /></> : <p>อ่านใจความสั้น ๆ โดยอ้างอิงความหมายที่ตรวจสอบได้</p>}<ErrorMessage error={error} /><button className="secondary" disabled={busy} onClick={onRequest}>{data || error ? 'ลองอธิบายอีกครั้ง' : 'ช่วยอธิบายคำนี้'} <span aria-hidden="true">↗</span></button></section>
-}
-
-function WordMap({ id, onSource }: { id: string; onSource: (s: Source) => void }) {
-  const [data, setData] = useState<Related>(), [error, setError] = useState<unknown>(), [attempt, setAttempt] = useState(0)
-  useEffect(() => { const controller = new AbortController(); setData(undefined); setError(null); api<Related>(`/words/${encodeURIComponent(id)}/related`, undefined, controller.signal).then(setData).catch(e => { if (e.name !== 'AbortError') setError(e) }); track('word_map_opened', { word_id: id }); return () => controller.abort() }, [id, attempt])
-  return <section className="map-section"><div className="section-heading"><div><span className="eyebrow">มองคำผ่านความเชื่อมโยง</span><h3>แผนที่คำ</h3></div><span className="muted">เชื่อมโยง 1 ชั้น</span></div><p className="muted">แสดงเฉพาะความสัมพันธ์จากแหล่งข้อมูลหรือผู้ดูแล ข้อมูลอาจยังไม่ครบทุกความสัมพันธ์</p><ErrorMessage error={error} />{error ? <button onClick={() => setAttempt(a => a + 1)}>ลองโหลดแผนที่อีกครั้ง</button> : !data ? <Busy /> : data.relationships.length === 0 ? <div className="empty-map"><span aria-hidden="true">◎</span><p>ยังไม่มีข้อมูลคำที่เกี่ยวข้องสำหรับคำนี้</p><small>คุณยังอ่านความหมายและตรวจสอบแหล่งข้อมูลด้านบนได้</small></div> : <><svg viewBox="0 0 640 410" role="img" aria-label={`แผนที่คำ ${data.center.word} รายการความสัมพันธ์ทั้งหมดอยู่ด้านล่าง`} className="word-map"><title>แผนที่คำ {data.center.word}</title>{data.relationships.slice(0, 8).map((edge, i, all) => { const angle = (i / all.length) * Math.PI * 2 - Math.PI / 2; const x = 320 + Math.cos(angle) * 220, y = 205 + Math.sin(angle) * 150; return <g key={edge.relationship_id} className={`edge-${edge.type}`}><line x1="320" y1="205" x2={x} y2={y} /><text x={(320 + x) / 2} y={(205 + y) / 2 - 10} className="edge-label" textAnchor="middle">{relations[edge.type]}</text><a href={wordHref(edge.to_id)} aria-label={`เปิดคำว่า ${edge.word} ${relations[edge.type]}`} onClick={() => track('related_word_clicked', { from_id: id, to_id: edge.to_id, relationship_type: edge.type })}><rect x={x - 66} y={y - 25} width="132" height="50" rx="18" /><text x={x} y={y + 6} textAnchor="middle">{edge.word.length > 12 ? edge.word.slice(0, 12) + '…' : edge.word}</text></a></g> })}<rect x="250" y="174" width="140" height="62" rx="21" className="center-node" /><text x="320" y="212" textAnchor="middle" className="center-text">{data.center.word}</text></svg><div className="legend">{[...new Set(data.relationships.map(e => e.type))].map(t => <span key={t} className={`legend-${t}`}>{relations[t]}</span>)}</div><h4>รายการความสัมพันธ์ทั้งหมด</h4><ul className="relation-list">{data.relationships.map(edge => <li key={edge.relationship_id}><span className="relation-kind">{relations[edge.type]}</span><a href={wordHref(edge.to_id)} onClick={() => track('related_word_clicked', { from_id: id, to_id: edge.to_id, relationship_type: edge.type })}>{edge.word} ↗</a><Provenance value={edge.provenance} /><SourceButton source={edge.source} onSource={onSource} /></li>)}</ul></>}<Feedback token={data?.feedback_target} /></section>
-}
-
-function WordPage({ id, onSource, onEvidence }: { id: string; onSource: (s: Source) => void; onEvidence: (id: string) => void }) {
-  const [word, setWord] = useState<Word>(), [error, setError] = useState<unknown>(), [data, setData] = useState<Explanation>(), [busy, setBusy] = useState(false), [aiError, setAiError] = useState<unknown>(), [senseId, setSenseId] = useState('')
-  const current = useRef(id); current.current = id
-  useEffect(() => { const controller = new AbortController(); setWord(undefined); setData(undefined); setError(null); setSenseId(''); api<Word>(`/words/${encodeURIComponent(id)}`, undefined, controller.signal).then(w => { setWord(w); track('word_card_viewed', { word_id: w.word_id }) }).catch(e => { if (e.name !== 'AbortError') setError(e) }); return () => controller.abort() }, [id])
-  async function explain() { if (!word) return; const requested = id; setBusy(true); setAiError(null); try { const response = await api<Explanation>('/explanations', { word_id: word.word_id, definition_id: senseId || null }); if (current.current === requested) setData(response) } catch (e) { if (current.current === requested) setAiError(e) } finally { if (current.current === requested) setBusy(false) } }
-  return <div className="page word-page"><a className="back-link" href="#/">← กลับไปผลการค้นหา</a><ErrorMessage error={error} />{!word && !error && <Busy />}{word && <><div className="word-heading"><div><span className="eyebrow">WORD CARD / รู้จักคำ</span><h1>{word.word}</h1><SourceButton source={word.source} onSource={onSource} /></div><a className="secondary" href={`#/compare?word=${encodeURIComponent(word.word_id)}`}>เปรียบเทียบคำนี้ ⇄</a></div><div className="word-layout"><article className="paper"><Definitions word={word} onSource={onSource} /><Feedback token={word.feedback_target} /></article><aside><label className="sense-select">ความหมายที่ต้องการอธิบาย<select value={senseId} onChange={e => { setSenseId(e.target.value); setData(undefined) }}><option value="">ทุกความหมาย</option>{word.definitions.map(d => <option key={d.definition_id} value={d.definition_id}>ความหมายที่ {d.number} — {d.text.slice(0, 40)}</option>)}</select></label><ExplanationPanel data={data} busy={busy} error={aiError} onRequest={() => void explain()} onEvidence={onEvidence} /></aside></div><WordMap id={word.word_id} onSource={onSource} /></>}</div>
-}
-
-function SearchPage({ query, setQuery, found, setFound, config }: { query: string; setQuery: (s: string) => void; found?: SearchResults; setFound: (s: SearchResults | undefined) => void; config?: Config }) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [searched, setSearched] = useState('')
-  const sequence = useRef(0)
-  async function submit(value = query, offset = 0) {
-    if (!value.trim()) { setError(new Error('ลองพิมพ์คำหรือความหมายที่คุณกำลังนึกถึง')); return }
-    if (Array.from(value).length > (config?.query_limit || 300)) { setError(new Error('ข้อความยาวเกินกำหนด กรุณาลองใช้คำอธิบายที่สั้นลง')); return }
-    const seq = ++sequence.current; setBusy(true); setError(null); setSearched(value)
-    try { const result = await api<SearchResults>('/search', { query: value, limit: 10, offset }); if (sequence.current === seq) { setFound(result); track('search_result_viewed', { count: result.candidates.length }) } } catch (e) { if (sequence.current === seq) setError(e) } finally { if (sequence.current === seq) setBusy(false) }
+  function replaceSelection(word: string) {
+    if (!selection) return
+    const characters = Array.from(doc.body)
+    onChange({ body: [...characters.slice(0, selection.start), ...Array.from(word), ...characters.slice(selection.end)].join('') })
+    setSelection(null); setEntry(null); setDirty(true)
   }
-  const examples = ['รักษาของเดิมไว้ไม่ให้สูญหาย', 'อนุรักษ์', 'ของสำหรับเด็กเล่น', 'ขัน']
-  return <div className="search-page"><section className={`hero ${found ? 'compact' : ''}`}><div className="hero-copy"><span className="eyebrow"><span className="tiny-dot" /> เชื่อมความคิด ให้พบคำ</span><h1>มีความหมายในใจ<br />ค้นพบ<span>คำที่ใช่</span></h1><p>นึกความหมายออก แต่ยังนึกคำไม่ออก?<br className="desktop-break" /> ลองเล่าให้เราฟัง แล้วสำรวจคำไทยไปด้วยกัน</p></div>{!found && <div className="hero-art" aria-hidden="true"><span className="art-tag tag-one">ความหมาย</span><span className="art-line line-one" /><span className="art-core">คำ</span><span className="art-line line-two" /><span className="art-tag tag-two">บริบท</span><span className="art-orbit" /><span className="art-dot dot-one" /><span className="art-dot dot-two" /><span className="art-caption">ทุกคำ มีความเชื่อมโยง</span></div>}</section><section className="search-workspace" aria-label="ค้นหาคำไทย"><form onSubmit={e => { e.preventDefault(); void submit() }}><label htmlFor="search-query">คำ ความหมาย หรือสิ่งที่คุณอยากสื่อ</label><div className="search-box"><span className="search-icon" aria-hidden="true">⌕</span><textarea id="search-query" rows={2} value={query} onChange={e => setQuery(e.target.value)} placeholder="เช่น คำที่หมายถึงรักษาของเดิมไว้ไม่ให้สูญหาย" aria-describedby="search-help" /><button className="primary" disabled={busy} type="submit">{busy ? 'กำลังค้นหา' : 'ค้นหาคำ'} <span aria-hidden="true">↗</span></button></div><p id="search-help" className="muted">พิมพ์เป็นคำ ประโยค หรือสถานการณ์ได้เลย · ไม่เกิน {config?.query_limit || 300} ตัวอักษร</p></form><div className="examples"><span>ลองค้นหา</span>{examples.map(ex => <button key={ex} onClick={() => { setQuery(ex); void submit(ex) }}>{ex} ↗</button>)}</div><ErrorMessage error={error} />{busy && <Busy>กำลังค้นหาคำและตรวจสอบความหมาย…</Busy>}</section>{found && !busy && <section className="results" aria-label="ผลการค้นหา"><div className="section-heading"><h2>คำที่ค้นพบ <span className="result-count">{found.candidates.length}</span></h2><span className="muted">เรียงตามความเกี่ยวข้อง</span></div>{searched && <p className="muted">จาก “{searched}”</p>}{found.degraded && <p className="notice" role="status">ค้นหาจากความหมายได้ไม่ครบในขณะนี้ ยังใช้การค้นหาคำตรงตัวและคำขึ้นต้นได้</p>}{found.candidates.length ? <ol className="candidate-grid">{found.candidates.map((c: Candidate, i) => <li key={c.word_id} className="candidate"><div className="candidate-top"><span className="rank">{String(found.offset + i + 1).padStart(2, '0')}</span><span className={`match ${c.match_type}`}>{c.match_type === 'exact' ? 'ตรงกับคำค้น' : c.match_type === 'partial' ? 'คำขึ้นต้นใกล้เคียง' : 'ใกล้เคียงความหมาย'}</span></div><a href={wordHref(c.word_id)} onClick={() => track('search_result_clicked', { word_id: c.word_id, rank: i + 1 })}><h3>{c.word} <span aria-hidden="true">↗</span></h3></a><p>{c.description || 'ยังไม่มีคำอธิบายสั้นจากแหล่งข้อมูล'}</p><div className="candidate-footer"><span>{c.source.name}</span><span>{c.sense_count} ความหมาย</span></div></li>)}</ol> : <div className="empty-state"><h3>{found.degraded ? 'ระบบค้นหาบางส่วนยังไม่พร้อม' : 'ยังไม่พบคำที่มั่นใจได้'}</h3><p>{found.degraded ? 'ลองค้นหาคำตรงตัว หรือส่งคำขออีกครั้งภายหลัง' : 'ลองใช้คำอธิบายสั้นลง หรือเปลี่ยนคำที่ใช้อธิบาย ข้อมูลชุดนี้ยังไม่ครอบคลุมทุกคำ'}</p></div>}{found.has_more && <button className="secondary" onClick={() => void submit(searched || query, found.offset + 10)}>ดูหน้าถัดไป →</button>}<Feedback token={found.feedback_target} /></section>}{!found && <section className="discover"><div className="section-heading"><h2>สำรวจภาษา ในแบบของคุณ</h2><span className="muted">เริ่มต้นจากความสงสัยเล็ก ๆ</span></div><div className="feature-grid"><a href={wordHref('อนุรักษ์')} className="feature-card"><span className="feature-icon">ก</span><h3>อ่านให้รู้จักคำ <span>↗</span></h3><p>ความหมายหลายมิติ พร้อมแหล่งอ้างอิงที่กลับไปตรวจสอบได้</p><span className="feature-bottom">ลองเปิดคำว่า “อนุรักษ์”</span></a><a href="#/compare" className="feature-card"><span className="feature-icon">⇄</span><h3>เทียบให้เห็นความต่าง <span>↗</span></h3><p>วางสองคำไว้คู่กัน แล้วค่อย ๆ เลือกคำที่สื่อความหมายได้ตรงใจ</p><span className="feature-bottom">เปรียบเทียบคำ</span></a><a href="#/context" className="feature-card"><span className="feature-icon">⌘</span><h3>เข้าใจคำในประโยค <span>↗</span></h3><p>เลือกคำจากข้อความของคุณ สำรวจความหมายและบริบทการใช้</p><span className="feature-bottom">เปิด Context Lens</span></a></div></section>}<p className="data-note"><span aria-hidden="true">◈</span> ข้อมูลจาก Thai Wiktionary ผ่าน PyThaiNLP · ไม่ใช่พจนานุกรมทางการของสำนักงานราชบัณฑิตยสภา</p></div>
+
+  function insertAtEnd(word: string) {
+    onChange({ body: doc.body + (doc.body && !doc.body.endsWith(' ') ? ' ' : '') + word })
+    setDirty(true)
+  }
+
+  const openTab = (next: Tab) => { setTab(next); setEntry(null); setSheetOpen(true) }
+
+  return (
+    <div className="shell">
+      <nav className="rail" aria-label="เมนูหลัก">
+        <button className="rail-btn" onClick={onBack} aria-label="กลับไปหน้าเอกสาร"><Icon d={PATHS.back} /><span className="tip">เอกสารทั้งหมด</span></button>
+        <button className="rail-btn" aria-pressed={tab === 'review' && !entry} onClick={() => openTab('review')}><Icon d={PATHS.write} /><span className="tip">ข้อเสนอแนะ</span></button>
+        <button className="rail-btn" aria-pressed={tab === 'find'} onClick={() => openTab('find')}><Icon d={PATHS.find} /><span className="tip">หาคำจากความหมาย</span></button>
+        <button className="rail-btn" aria-pressed={tab === 'compare'} onClick={() => openTab('compare')}><Icon d={PATHS.compare} /><span className="tip">เทียบสองคำ</span></button>
+        <button className="rail-btn" onClick={() => setModal('breakdown')}><Icon d={PATHS.chart} /><span className="tip">สรุปข้อความ</span></button>
+        <div className="spacer" />
+        <button className="rail-btn" onClick={toggleTheme} aria-label="สลับธีม"><Icon d={theme === 'dark' ? PATHS.sun : PATHS.moon} /><span className="tip">{theme === 'dark' ? 'ธีมสว่าง' : 'ธีมมืด'}</span></button>
+        <button className="rail-btn" onClick={onPrivacy} aria-label="ข้อมูลและความเป็นส่วนตัว"><Icon d={PATHS.shield} /><span className="tip">ความเป็นส่วนตัว</span></button>
+      </nav>
+
+      <div className="workspace">
+        <header className="doc-head">
+          <input className="doc-title" value={doc.title} aria-label="ชื่อเอกสาร"
+            onChange={event => onChange({ title: event.target.value })}
+            onBlur={event => { if (!event.target.value.trim()) onChange({ title: store.UNTITLED }) }} />
+          <button className="btn" onClick={() => setModal('goals')}>{formalityLabels[doc.formality]}</button>
+          <div className="score-chip"><b className="num">{visible ? visible.score : '–'}</b><span>คะแนน</span></div>
+        </header>
+
+        <div className="surface" id="main" tabIndex={-1}>
+          <Editor
+            value={doc.body}
+            onChange={body => { onChange({ body }); setDirty(true) }}
+            suggestions={visible?.suggestions || []}
+            tokens={visible?.tokens || []}
+            activeId={activeId}
+            selection={selection}
+            onActivate={id => { setActiveId(id); setTab('review'); setEntry(null); setSheetOpen(true) }}
+            onSelect={range => {
+              setSelection(range)
+              if (range && range.text.trim()) { setEntry(range.text.trim()); setSheetOpen(true) }
+              else setEntry(null)
+            }}
+            placeholder="เริ่มพิมพ์ภาษาไทยที่นี่ แล้วเลือกคำใดก็ได้เพื่อดูความหมายและคำใกล้เคียง"
+          />
+        </div>
+
+        {/* The rail collapses to a sheet on narrow screens, so a failed review would
+            otherwise fail silently. Say it where the writer is looking. */}
+        {Boolean(error) && !sheetOpen && (
+          <p className="alert" style={{ margin: '0 28px 12px' }} role="alert">
+            {error instanceof Error ? error.message : 'ตรวจข้อความไม่สำเร็จ กรุณาลองอีกครั้ง'}
+          </p>
+        )}
+
+        <div className="toolbar">
+          <span className="count">{countWords(doc.body).toLocaleString('th-TH')} คำ</span>
+          <span className="tiny">· {audienceLabels[doc.audience]}</span>
+          <div className="spacer" />
+          <button className="btn btn-sm" onClick={() => setModal('breakdown')}>สรุปข้อความ</button>
+          <button className="btn btn-sm btn-primary" onClick={() => void analyze()} disabled={busy || !doc.body.trim()}>
+            {busy ? 'กำลังตรวจ…' : 'ตรวจข้อความ'}
+          </button>
+        </div>
+      </div>
+
+      <aside className="side" data-open={String(sheetOpen)} aria-label="แผงช่วยเขียน">
+        <div className="side-tabs" role="tablist">
+          {([['review', 'ข้อเสนอแนะ'], ['find', 'หาคำ'], ['compare', 'เทียบคำ']] as [Tab, string][]).map(([id, label]) => (
+            <button key={id} className="side-tab" role="tab" aria-selected={tab === id && !entry} onClick={() => openTab(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="side-body">
+          {entry ? (
+            <>
+              <button className="btn btn-sm btn-ghost" style={{ marginBottom: 10 }} onClick={() => setEntry(null)}>← กลับไปข้อเสนอแนะ</button>
+              <EntryPanel term={entry} onSource={setSource} onReplace={replaceSelection} onSearch={value => { setEntry(null); setTab('find'); setSelection(null); setFindSeed(value) }} />
+            </>
+          ) : tab === 'review' ? (
+            <ReviewPanel
+              review={visible} busy={busy} error={error} activeId={activeId} filter={filter} onFilter={setFilter}
+              onActivate={setActiveId} onAccept={accept} onDismiss={id => setDismissed(prev => new Set(prev).add(id))}
+              onAnalyze={() => void analyze()} dirty={dirty && !!review}
+            />
+          ) : tab === 'find' ? (
+            <FindPanel seed={findSeed} onInsert={word => (selection ? replaceSelection(word) : insertAtEnd(word))} onOpen={setEntry} />
+          ) : (
+            <ComparePanel seed={selection?.text.trim() || ''} onSource={setSource} />
+          )}
+        </div>
+      </aside>
+
+      {modal === 'breakdown' && <BreakdownModal review={visible} onClose={() => setModal(null)} />}
+      {modal === 'goals' && (
+        <GoalsModal formality={doc.formality} audience={doc.audience}
+          onChange={next => onChange(next)} onClose={() => setModal(null)} />
+      )}
+      {source && <SourceModal source={source} config={config} onClose={() => setSource(undefined)} />}
+    </div>
+  )
 }
 
-function ComparePage({ initial, onSource, onEvidence }: { initial?: string; onSource: (s: Source) => void; onEvidence: (id: string) => void }) {
-  const [input, setInput] = useState(''), [words, setWords] = useState<Word[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [comparison, setComparison] = useState<{ words: Word[]; errors: { message: string; word_id: string }[]; state: string; feedback_target?: string }>(), [explanation, setExplanation] = useState<Explanation>(), [aiBusy, setAiBusy] = useState(false), [aiError, setAiError] = useState<unknown>()
-  useEffect(() => { if (initial) api<Word>(`/words/${encodeURIComponent(initial)}`).then(w => setWords([w])).catch(setError) }, [initial])
-  async function add(value = input) { if (!value.trim()) { setError(new Error('กรุณาพิมพ์คำที่ต้องการเปรียบเทียบ')); return }; setBusy(true); setError(null); try { const w = await api<Word>(`/words/${encodeURIComponent(value.trim())}`); if (words.some(x => x.word_id === w.word_id)) throw new Error('เลือกคำนี้แล้ว กรุณาเลือกอีกคำที่แตกต่างกัน'); setWords([...words, w].slice(0, 2)); setInput(''); setComparison(undefined); setExplanation(undefined) } catch (e) { setError(e) } finally { setBusy(false) } }
-  async function compare() { setBusy(true); setError(null); try { track('word_compare_started', { count: 2 }); setComparison(await api('/compare', { word_ids: words.map(w => w.word_id) })); track('word_compare_completed', { count: 2 }) } catch (e) { setError(e) } finally { setBusy(false) } }
-  async function explain() { setAiBusy(true); setAiError(null); try { setExplanation(await api('/compare/explanations', { word_ids: words.map(w => w.word_id) })) } catch (e) { setAiError(e) } finally { setAiBusy(false) } }
-  return <div className="page"><span className="eyebrow">COMPARE / เทียบความหมาย</span><h1>ใกล้เคียงกัน ต่างกันตรงไหน</h1><p className="page-intro">เลือกสองคำ แล้วอ่านความหมายจากแหล่งข้อมูลควบคู่กัน</p><section className="paper selection-panel"><form className="inline-form" onSubmit={e => { e.preventDefault(); void add() }}><label htmlFor="compare-word">คำที่ต้องการเปรียบเทียบ<input id="compare-word" value={input} onChange={e => setInput(e.target.value)} placeholder="เช่น อนุรักษ์ หรือ สงวน" disabled={words.length === 2} /></label><button className="secondary" disabled={busy || words.length === 2}>เพิ่มคำ +</button></form><div className="selected-words">{words.map(w => <span key={w.word_id}>{w.word}<button aria-label={`นำ ${w.word} ออกจากการเปรียบเทียบ`} onClick={() => { setWords(words.filter(x => x.word_id !== w.word_id)); setComparison(undefined); setExplanation(undefined) }}>×</button></span>)}<small>{words.length}/2 คำ</small></div><button className="primary" disabled={words.length !== 2 || busy} onClick={() => void compare()}>เปรียบเทียบสองคำ ⇄</button><ErrorMessage error={error} />{busy && <Busy />}</section>{comparison && <><div className="comparison-grid">{comparison.words.map(w => <article key={w.word_id} className="paper"><a href={wordHref(w.word_id)} className="compare-word-link"><h2>{w.word} ↗</h2></a><Definitions word={w} onSource={onSource} /><p className="muted">บริบท ตัวอย่าง หรือข้อควรระวังที่ไม่มีหลักฐานจะไม่ถูกสร้างเพิ่ม</p></article>)}{comparison.errors.map(e => <div key={e.word_id} className="notice error" role="alert">{e.message}</div>)}</div><Feedback token={comparison.feedback_target} />{comparison.state === 'results' && <ExplanationPanel data={explanation} busy={aiBusy} error={aiError} onRequest={() => void explain()} onEvidence={onEvidence} />}</>}</div>
-}
-
-function ContextPage({ config, onSource, onEvidence }: { config?: Config; onSource: (s: Source) => void; onEvidence: (id: string) => void }) {
-  const [text, setText] = useState(''), [submitted, setSubmitted] = useState(''), [spans, setSpans] = useState<Span[]>(), [busy, setBusy] = useState(false), [error, setError] = useState<unknown>(), [selected, setSelected] = useState<Span>(), [word, setWord] = useState<Word>(), [context, setContext] = useState<ContextResult>(), [aiBusy, setAiBusy] = useState(false)
-  const seq = useRef(0)
-  async function analyze() { if (!text.trim()) { setError(new Error('กรุณาใส่ประโยคหรือข้อความที่ต้องการอ่าน')); return }; if (Array.from(text).length > (config?.context_limit || 3000)) { setError(new Error('ข้อความยาวเกินกำหนด กรุณาลดความยาว')); return }; ++seq.current; setBusy(true); setError(null); setWord(undefined); setContext(undefined); setSelected(undefined); try { const found = await api<{ spans: Span[] }>('/context', { text }); setSpans(found.spans); setSubmitted(text) } catch (e) { setError(e) } finally { setBusy(false) } }
-  async function choose(span: Span) { const current = ++seq.current; setSelected(span); setContext(undefined); setWord(undefined); setAiBusy(true); setError(null); try { const w = await api<Word>(`/words/${span.word_id}`); if (current !== seq.current) return; setWord(w); const result = await api<ContextResult>('/context/explanations', { text: submitted, word_id: span.word_id, start: span.start, end: span.end }); if (current === seq.current) setContext(result) } catch (e) { if (current === seq.current) setError(e) } finally { if (current === seq.current) setAiBusy(false) } }
-  const pieces: React.ReactNode[] = []; let last = 0; const characters = Array.from(submitted)
-  for (const span of spans || []) { pieces.push(characters.slice(last, span.start).join('')); pieces.push(<button key={span.start} className="context-token" aria-pressed={selected?.start === span.start} aria-label={`เลือกคำว่า ${span.text} ตำแหน่ง ${span.start + 1}`} onClick={() => void choose(span)}>{span.text}</button>); last = span.end }
-  pieces.push(characters.slice(last).join(''))
-  return <div className="page"><span className="eyebrow">CONTEXT LENS / อ่านคำในบริบท</span><h1>เข้าใจคำ ผ่านข้อความของคุณ</h1><p className="page-intro">วางประโยคสั้น ๆ แล้วเลือกคำที่อยากเข้าใจให้มากขึ้น</p><section className="paper"><form onSubmit={e => { e.preventDefault(); void analyze() }}><label htmlFor="context-text">ประโยคหรือข้อความภาษาไทย<textarea id="context-text" rows={5} value={text} onChange={e => { setText(e.target.value); setSpans(undefined); setWord(undefined); setContext(undefined); seq.current++ }} placeholder="เช่น เราช่วยกันอนุรักษ์ภาษาไทย" aria-describedby="context-privacy" /></label><div className="section-heading"><p id="context-privacy" className="muted">ประมวลผลเฉพาะครั้งนี้ ไม่บันทึกข้อความของคุณ · สูงสุด {config?.context_limit || 3000} ตัวอักษร</p><button className="primary" disabled={busy}>อ่านคำในข้อความ ↗</button></div></form><ErrorMessage error={error} />{busy && <Busy>กำลังตรวจหาคำในข้อความ…</Busy>}</section>{spans && <section className="paper context-detection"><h2>{spans.length ? 'เลือกคำที่คุณสนใจ' : 'ยังไม่พบคำที่รองรับในข้อความนี้'}</h2><p className="context-text">{pieces}</p>{!spans.length && <p>ลองแก้ข้อความหรือค้นหาคำโดยตรง ชุดข้อมูลนี้ยังไม่ครอบคลุมทุกคำ</p>}</section>}{word && <article className="paper context-word"><h2>{selected?.text} <span className="muted">ในประโยคนี้</span></h2><Definitions word={word} onSource={onSource} />{context?.ambiguous && <p className="notice" role="status">คำนี้มีหลายความหมายที่อาจเป็นไปได้ ยังไม่มีหลักฐานพอเลือกความหมายเดียว โปรดอ่านแต่ละความหมายประกอบประโยค</p>}<ExplanationPanel data={context?.explanation} busy={aiBusy} error={null} onRequest={() => { if (selected) void choose(selected) }} onEvidence={onEvidence} />{Boolean(context?.alternatives.length) && <section><h3>คำใกล้เคียงที่ลองพิจารณาได้</h3>{context?.alternatives.map(a => <p key={a.word_id}><a href={wordHref(a.word_id || a.to_id)}>{a.word}</a> — {a.description}<br /><small>{a.qualification}</small>{a.generated_explanation && <><br /><Provenance value="AI_GENERATED_METADATA" />{a.generated_explanation.claims.map((claim, i) => <span key={i}><br />{claim.text} {claim.evidence_ids.map(id => <button className="source-link" key={id} onClick={() => onEvidence(id)}>ดูหลักฐาน ↗</button>)}</span>)}</>}</p>)}</section>}<Feedback token={context?.feedback_target} /></article>}</div>
-}
-
-function Modal({ source, evidenceId, config, privacy, close }: { source?: Source; evidenceId?: string; config?: Config; privacy: boolean; close: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null), [manifest, setManifest] = useState<Record<string, unknown>>(), [evidence, setEvidence] = useState<Evidence>(), [error, setError] = useState<unknown>()
-  useEffect(() => { ref.current?.showModal(); return () => ref.current?.close() }, [])
-  useEffect(() => { const controller = new AbortController(); if (source) api<Record<string, unknown>>(`/sources/${source.dataset_id}`, undefined, controller.signal).then(setManifest).catch(e => { if (e.name !== 'AbortError') setError(e) }); if (evidenceId) api<Evidence>(`/evidence/${evidenceId}`, undefined, controller.signal).then(setEvidence).catch(e => { if (e.name !== 'AbortError') setError(e) }); return () => controller.abort() }, [source, evidenceId])
-  return <dialog ref={ref} onCancel={close} aria-labelledby="dialog-title" className="source-dialog"><div className="section-heading"><h2 id="dialog-title">{privacy ? 'ข้อมูลของคุณและความเป็นส่วนตัว' : evidenceId ? 'หลักฐานที่ใช้ประกอบคำอธิบาย' : 'ตรวจสอบแหล่งข้อมูล'}</h2><button onClick={close} aria-label="ปิดหน้าต่าง" className="close-dialog">×</button></div>{privacy ? <div className="privacy-copy"><p>ค้นหาและอ่านคำได้โดยไม่ต้องสมัครสมาชิก เราไม่สร้างบัญชีให้คุณโดยอัตโนมัติ</p><p>ไม่บันทึกคำค้น ประโยคที่ส่ง รายละเอียดรายงาน IP หรือข้อมูลอุปกรณ์ลงในบันทึกการใช้งาน คะแนนและเหตุผลการแจ้งปัญหาจะเก็บแยกจากข้อมูลพจนานุกรม โดยใช้รหัสการโต้ตอบที่ไม่ระบุตัวตน</p><p>ใช้รหัสชั่วคราวในหน่วยความจำของแท็บเพื่อป้องกันการนับคะแนนซ้ำ ไม่มีคุกกี้ติดตาม</p><p>{config?.remote_processing ? 'โหมดโมเดลที่กำหนดเอง: ข้อความและหลักฐานที่จำเป็นอาจถูกส่งไปยังผู้ให้บริการที่ผู้ดูแลตั้งค่า โปรดหลีกเลี่ยงข้อมูลส่วนบุคคล' : 'โหมดในเครื่อง: คำค้น ประโยค และการสรุปประมวลผลในระบบนี้ ไม่มีการส่งไปยังผู้ให้บริการโมเดลภายนอก'}</p><p>สถิติผลิตภัณฑ์: {config?.analytics_enabled ? 'เปิด เฉพาะรหัสรายการ สถานะ และเวลา' : 'ปิด'} · ระยะเก็บข้อมูลความคิดเห็นเริ่มต้น {config?.retention_days || 7} วัน การใช้งาน production ต้องประกาศผู้รับผิดชอบและนโยบายที่อนุมัติก่อน</p><p>ความหมายมาจาก Thai Wiktionary ผ่าน PyThaiNLP ไม่ใช่พจนานุกรมทางการของสำนักงานราชบัณฑิตยสภา คำอธิบายเพิ่มเติมและความคิดเห็นผู้ใช้อยู่คนละส่วน</p></div> : <><ErrorMessage error={error} />{!manifest && !evidence && !error && <Busy />}{evidence && <><Provenance value="SOURCE_DATA" /><h3>{evidence.word} · ความหมายที่ {evidence.number}</h3><blockquote>{evidence.text}</blockquote><p>{evidence.source.name} · รุ่น {evidence.source.version}</p><a href={evidence.record_url} target="_blank" rel="noopener noreferrer">เปิดบทความต้นทาง ↗</a><p className="muted">แหล่งข้อมูลรองรับเนื้อหานี้ แต่ไม่ได้เป็นผู้เขียนถ้อยคำที่ระบบสรุป</p></>}{manifest && <><Provenance value="SOURCE_DATA" /><h3>{String(manifest.name)}</h3><dl className="source-details"><dt>รุ่นข้อมูล</dt><dd>{String(manifest.version)}</dd><dt>ต้นทาง</dt><dd>ผู้ร่วมเขียน Thai Wiktionary · รวบรวมโดย PyThaiNLP</dd><dt>วันที่ดึงข้อมูล</dt><dd>{String(manifest.retrieved_at)}</dd><dt>ใบอนุญาต</dt><dd><a href={String(manifest.license_url)} target="_blank" rel="noopener noreferrer">{String(manifest.license)}</a></dd><dt>การปรับรูปแบบ</dt><dd>แยกความหมายตามลำดับต้นฉบับและเพิ่มรหัสคงที่ เก็บรูปคำไทยและนิยามเดิม</dd><dt>SHA-256</dt><dd className="checksum">{String(manifest.sha256)}</dd></dl><p className="notice">ไม่ใช่ข้อมูลนิยามทางการของสำนักงานราชบัณฑิตยสภา</p><a href={String(manifest.release_url)} target="_blank" rel="noopener noreferrer">ดู release และสิทธิ์ใช้งานต้นทาง ↗</a><p className="muted">ข้อมูลรุ่นนี้ไม่มี revision ของ Wiktionary แยกรายคำ ลิงก์ต้นทางปัจจุบันอาจต่างจาก snapshot ที่นำเข้า</p></>}</>}</dialog>
-}
-
+/* ---------------- root ---------------- */
 function App() {
-  const [hash, setHash] = useState(location.hash || '#/'), [query, setQuery] = useState(''), [found, setFound] = useState<SearchResults>(), [config, setConfig] = useState<Config>(), [source, setSource] = useState<Source>(), [evidenceId, setEvidenceId] = useState<string>(), [privacy, setPrivacy] = useState(false)
-  useEffect(() => { api<Config>('/config').then(setConfig).catch(() => undefined); const listener = () => setHash(location.hash || '#/'); window.addEventListener('hashchange', listener); return () => window.removeEventListener('hashchange', listener) }, [])
-  useEffect(() => { window.scrollTo(0, 0); document.querySelector<HTMLElement>('main')?.focus() }, [hash])
-  const word = wordKeyFromHash(hash), compare = hash.startsWith('#/compare'), context = hash === '#/context'
-  return <><a className="skip-link" href="#main" onClick={e => { e.preventDefault(); document.getElementById('main')?.focus() }}>ข้ามไปเนื้อหาหลัก</a><header className="site-header"><a className="brand" href="#/" aria-label="KhamLink หน้าหลัก"><span className="brand-mark" aria-hidden="true">คำ<span>↗</span></span><span>Kham<span className="brand-light">Link</span><small>คำเชื่อมความคิด</small></span></a><nav aria-label="เมนูหลัก"><a href="#/" aria-current={!word && !compare && !context ? 'page' : undefined}>ค้นหาคำ</a><a href="#/compare" aria-current={compare ? 'page' : undefined}>เปรียบเทียบ</a><a href="#/context" aria-current={context ? 'page' : undefined}>คำในบริบท</a></nav><span className="header-note"><span className="tiny-dot" /> ภาษาไทย เชื่อมถึงกัน</span></header><main id="main" tabIndex={-1}>{word ? <WordPage key={word} id={word} onSource={setSource} onEvidence={setEvidenceId} /> : compare ? <ComparePage initial={new URLSearchParams(hash.split('?')[1]).get('word') || undefined} onSource={setSource} onEvidence={setEvidenceId} /> : context ? <ContextPage config={config} onSource={setSource} onEvidence={setEvidenceId} /> : <SearchPage query={query} setQuery={setQuery} found={found} setFound={setFound} config={config} />}</main><footer><a href="#/" className="footer-brand">KhamLink <span>เชื่อมคำ ให้เข้าใจ</span></a><div><span>Thai Wiktionary · CC BY-SA 4.0</span><button className="text-button" onClick={() => setPrivacy(true)}>ข้อมูลและความเป็นส่วนตัว</button></div></footer>{(source || evidenceId || privacy) && <Modal source={source} evidenceId={evidenceId} privacy={privacy} config={config} close={() => { setSource(undefined); setEvidenceId(undefined); setPrivacy(false) }} />}</>
+  const [docs, setDocs] = useState<Doc[]>(() => store.load())
+  const [route, setRoute] = useState(location.hash)
+  const [config, setConfig] = useState<Config>()
+  const [privacy, setPrivacy] = useState(false)
+  const [toast, setToast] = useState<{ message: string; undo?: () => void } | null>(null)
+  const [theme, toggleTheme] = useTheme()
+
+  useEffect(() => {
+    const onHash = () => setRoute(location.hash)
+    addEventListener('hashchange', onHash)
+    return () => removeEventListener('hashchange', onHash)
+  }, [])
+  useEffect(() => { api<Config>('/config').then(setConfig).catch(() => undefined) }, [])
+  useEffect(() => { store.save(docs) }, [docs])
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const openId = route.startsWith('#/doc/') ? decodeURIComponent(route.slice(6)) : ''
+  const current = docs.find(d => d.id === openId)
+
+  function create() {
+    const doc = store.create()
+    setDocs(previous => [doc, ...previous])
+    location.hash = `#/doc/${doc.id}`
+  }
+  function patch(id: string, changes: Partial<Doc>) {
+    setDocs(previous => previous.map(d => (d.id === id ? { ...d, ...changes, updated: Date.now() } : d)))
+  }
+  function remove(id: string) {
+    const victim = docs.find(d => d.id === id)
+    if (!victim) return
+    setDocs(previous => previous.filter(d => d.id !== id))
+    setToast({ message: `ลบ “${victim.title || store.UNTITLED}” แล้ว`, undo: () => { setDocs(previous => [victim, ...previous]); setToast(null) } })
+  }
+  function duplicate(id: string) {
+    const original = docs.find(d => d.id === id)
+    if (!original) return
+    setDocs(previous => [store.create({ ...original, id: undefined, title: `${original.title} (สำเนา)`, updated: Date.now() }), ...previous])
+  }
+
+  return (
+    <>
+      <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); document.getElementById('main')?.focus() }}>ข้ามไปเนื้อหาหลัก</a>
+      {current ? (
+        <Workspace doc={current} onChange={changes => patch(current.id, changes)} onBack={() => { location.hash = '#/' }}
+          theme={theme} toggleTheme={toggleTheme} config={config} onPrivacy={() => setPrivacy(true)} />
+      ) : (
+        <Dashboard docs={docs} onOpen={id => { location.hash = `#/doc/${id}` }} onCreate={create} onDelete={remove}
+          onDuplicate={duplicate} onPrivacy={() => setPrivacy(true)} theme={theme} toggleTheme={toggleTheme} config={config} />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          {toast.message}
+          {toast.undo && <button onClick={toast.undo}>เลิกทำ</button>}
+        </div>
+      )}
+      {privacy && <PrivacyModal config={config} onClose={() => setPrivacy(false)} />}
+    </>
+  )
 }
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>)

@@ -1,5 +1,5 @@
 export type Provenance = 'SOURCE_DATA' | 'CURATED_METADATA' | 'AI_GENERATED_METADATA' | 'USER_GENERATED_DATA'
-export interface Source { source_id: string; version: string; dataset_id: string; name: string; license: string; license_url: string; official_royal_society: false; provenance: Provenance }
+export interface Source { source_id: string; version: string; dataset_id: string; name: string; license: string; license_url: string; official_royal_society: boolean; provenance: Provenance }
 export interface Definition { definition_id: string; number: number; text: string; part_of_speech: string | null; metadata: Record<string, string | null>; record_url: string; history_url: string; provenance: Provenance; source: Source }
 export interface Metadata { id: string; definition_id?: string; kind: string; text: string; evidence_ids: string[]; process_id: string; provenance: Provenance }
 export interface Word { word_id: string; word: string; dataset_id: string; definitions: Definition[]; source: Source; curated_metadata: Metadata[]; ai_generated_metadata: Metadata[]; feedback_target?: string }
@@ -8,8 +8,59 @@ export interface SearchResults { candidates: Candidate[]; state: string; degrade
 export interface Claim { word: string; number: number; text: string; evidence_ids: string[]; source_version: string; provenance: Provenance }
 export interface Evidence extends Definition { word: string; word_id: string }
 export interface Explanation { state: string; reason?: string; text?: string; claims: Claim[]; evidence: Evidence[]; provenance: Provenance; mode?: string; limitation?: string; curated_metadata?: Metadata[]; feedback_target?: string }
-export interface Related { center: { word_id: string; word: string }; relationships: Edge[]; state: string; dataset_id: string; feedback_target?: string }
+export interface Neighbour { word_id: string; definition_id: string; word: string; description: string; similarity: number; provenance: Provenance }
+export interface Related { center: { word_id: string; word: string }; relationships: Edge[]; semantic_neighbours: Neighbour[]; semantic_neighbours_state: string; state: string; dataset_id: string; feedback_target?: string }
 export interface Edge { relationship_id: string; to_id: string; word_id?: string; type: string; word: string; description: string; provenance: Provenance; process_id: string; evidence_ids: string[]; source: Source; qualification?: string; generated_explanation?: Explanation; source_word_id?: string; target_word_id?: string; publication_state?: string; eligible?: boolean }
 export interface Span { word_id: string; text: string; start: number; end: number }
 export interface ContextResult { selection: Span; word: Word; sense_ids: string[]; ambiguous: boolean; explanation: Explanation; alternatives: Edge[]; feedback_target?: string }
-export interface Config { query_limit: number; context_limit: number; map_limit: number; provider_mode: string; remote_processing?: boolean; llm_model?: string; embedding_model?: string; analytics_enabled: boolean; retention_days: number; source_notice: string }
+export interface Config { query_limit: number; context_limit: number; map_limit: number; provider_mode: string; remote_processing?: boolean; llm_model?: string; embedding_model?: string; analytics_enabled: boolean; retention_days: number; source_notice: string; source_label: string }
+
+/* ---- document review: the four suggestion categories the rail renders ---- */
+export type Category = 'correctness' | 'clarity' | 'engagement' | 'delivery'
+
+export interface Replacement {
+  word: string
+  word_id: string
+  definition: string
+  reason: string
+  provenance: Provenance
+}
+
+export interface Suggestion {
+  id: string
+  start: number
+  end: number
+  text: string
+  word_id: string | null
+  category: Category
+  title: string
+  message: string
+  replacements: Replacement[]
+  evidence_ids: string[]
+}
+
+export interface ReviewStats {
+  characters: number
+  words: number
+  sentences: number
+  reading_seconds: number
+  speaking_seconds: number
+  known_words: number
+  coverage: number
+  repeated: { word: string; count: number }[]
+  registers: { label: string; count: number }[]
+  editions: { label: string; count: number }[]
+}
+
+/** Every dictionary word the review found, suggestion or not. Thai has no inter-word
+    spaces, so the browser cannot tell which word a caret sits in — this is how it knows. */
+export interface Token { start: number; end: number; text: string; word_id: string }
+
+export interface Review {
+  score: number
+  suggestions: Suggestion[]
+  tokens: Token[]
+  stats: ReviewStats
+  degraded: boolean
+  degraded_reason?: string
+}

@@ -83,6 +83,11 @@ class ContextSelection(ContextRequest):
     end: int = Field(gt=0)
 
 
+class ReviewRequest(StrictModel):
+    text: str
+    formality: str = "neutral"
+
+
 class ExplanationRequest(StrictModel):
     word_id: str
     definition_id: str | None = None

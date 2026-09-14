@@ -19,6 +19,7 @@ from .domain import (
     EventRequest,
     ExplanationRequest,
     FeedbackRequest,
+    ReviewRequest,
     SearchRequest,
     validate_text,
 )
@@ -28,8 +29,58 @@ from .observability import PRODUCT_EVENTS, Telemetry
 from .providers import generation_provider
 from .repository import SQLLexicalRepository
 from .retrieval import IndexBuilder, SearchService
+from .review import ReviewService
 from .security import RateLimiter, Security
 from .services import ComparisonService, ContextService, FeedbackService
+
+GENERIC_SOURCE_NOTICE = "ความหมายทั้งหมดมาจากชุดข้อมูลที่เผยแพร่ ตรวจสอบแหล่งข้อมูลได้จากทุกความหมาย"
+
+
+def configured_source(settings: Settings) -> dict | None:
+    """The manifest this deployment is configured for, or None if it cannot be read."""
+    from .ingestion import approved_manifest
+
+    try:
+        return approved_manifest(settings)
+    except Exception:
+        return None
+
+
+def source_notice(settings: Settings) -> str:
+    """What the interface tells readers about the data. Taken from the configured source
+    so the claim can never drift from the corpus actually being served."""
+    manifest = configured_source(settings)
+    if not manifest:
+        return GENERIC_SOURCE_NOTICE
+    if manifest.get("notice"):
+        return manifest["notice"]
+    origin = "เป็นพจนานุกรมทางการของสำนักงานราชบัณฑิตยสภา"
+    if manifest.get("official_royal_society") is False:
+        origin = "ไม่ใช่พจนานุกรมทางการของสำนักงานราชบัณฑิตยสภา"
+    return f"ข้อมูลจาก {manifest['name']} {origin}"
+
+
+def source_label(settings: Settings) -> str:
+    """Short attribution for the page footer."""
+    manifest = configured_source(settings)
+    return f"{manifest['name']} · {manifest['license']}" if manifest else ""
+
+
+def ingestion_service(settings: Settings, factory, security):
+    """The staging path that matches the configured corpus shape."""
+    from .rid import CORPUS_FORMAT, RIDIngestionService
+
+    manifest = configured_source(settings)
+    service = RIDIngestionService if (manifest or {}).get("format") == CORPUS_FORMAT else IngestionService
+    return service(settings, factory, security)
+
+
+def embedding_identity_for_display(settings: Settings) -> str | None:
+    if settings.embedding == "qwen":
+        return settings.embedding_model
+    if settings.embedding == "bge-m3":
+        return settings.bge_model
+    return None
 
 
 def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
@@ -45,7 +96,8 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
     comparisons = ComparisonService(repository, grounding)
     context = ContextService(settings, repository, search, grounding)
     feedback = FeedbackService(settings, factory, security, repository)
-    ingestion = IngestionService(settings, factory, security)
+    reviewer = ReviewService(settings, repository, search, context, telemetry)
+    ingestion = ingestion_service(settings, factory, security)
     limiter = RateLimiter(settings)
 
     @asynccontextmanager
@@ -235,13 +287,17 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
                 "map_limit": settings.map_limit,
                 "provider_mode": settings.provider,
                 "llm_model": settings.provider_model if settings.provider in {"glm", "compatible"} else None,
-                "embedding_model": settings.embedding_model if settings.embedding == "qwen" else None,
+                "embedding_model": embedding_identity_for_display(settings),
+                # Query expansion sends the reader's own words to the provider, so it counts
+                # as remote processing even when the embeddings themselves are local.
                 "remote_processing": settings.embedding == "qwen"
-                or settings.provider in {"glm", "compatible"},
+                or settings.provider in {"glm", "compatible"}
+                or settings.query_expansion,
                 "analytics_enabled": settings.analytics_enabled,
                 "retention_days": settings.retention_days,
                 "free_text_reports": False,
-                "source_notice": "ข้อมูลจาก Thai Wiktionary ผ่าน PyThaiNLP ไม่ใช่พจนานุกรมทางการของสำนักงานราชบัณฑิตยสภา",
+                "source_notice": source_notice(settings),
+                "source_label": source_label(settings),
             },
         )
 
@@ -292,6 +348,23 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
     def related(request: Request, key: str):
         validate_text(key, 512, "word")
         related_data = repository.related(key, settings.map_limit)
+        # Model-derived neighbours ride alongside the source map, never inside it: the map
+        # shows only relationships the dictionary itself declares.
+        related_data["semantic_neighbours"] = []
+        related_data["semantic_neighbours_state"] = "unavailable"
+        try:
+            neighbours = search.load_adapter(repository.release()).neighbours
+            word = repository.lookup(related_data["center"]["word_id"], related_data["dataset_id"])
+            related_data["semantic_neighbours"] = neighbours(
+                [d["definition_id"] for d in word["definitions"]], settings.map_limit
+            )
+            related_data["semantic_neighbours_state"] = "available"
+        except Exception:
+            telemetry.emit(
+                "dependency",
+                request.state.correlation_id,
+                {"dependency": "neighbours", "status": "failed"},
+            )
         return result(
             request,
             target(related_data, "map", related_data["center"]["word_id"], related_data["dataset_id"]),
@@ -344,6 +417,14 @@ def create_app(settings: Settings | None = None, provider=None) -> FastAPI:
                 data["words"][0]["dataset_id"],
             ),
         )
+
+    @app.post("/api/review")
+    def review_document(request: Request, payload: ReviewRequest):
+        text = validate_text(payload.text, settings.context_limit, "text")
+        if payload.formality not in {"formal", "neutral", "casual"}:
+            raise DomainError("INVALID_GOAL", "ระดับภาษาที่เลือกไม่รองรับ", fields=["formality"])
+        data = reviewer.review(text, payload.formality, request.state.correlation_id)
+        return result(request, data)
 
     @app.post("/api/context")
     def detect_context(request: Request, payload: ContextRequest):
